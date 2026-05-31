@@ -1,0 +1,26 @@
+# Auto-detect text files and normalize line endings
+* text=auto
+
+# Rust source
+*.rs text diff=rust
+*.toml text
+*.lock text
+
+# Shell scripts must have LF
+*.sh text eol=lf
+Makefile text eol=lf
+
+# Documentation
+*.md text diff=markdown
+*.json text
+
+# Binary files
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+
+# Archives
+*.tar.gz binary
+*.zip binary

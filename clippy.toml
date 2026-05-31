@@ -1,0 +1,21 @@
+# Clippy configuration for hypermail-rs
+# See: https://doc.rust-lang.org/clippy/configuration.html
+
+# Complexity thresholds
+cognitive-complexity-threshold = 30
+too-many-arguments-threshold = 8
+type-complexity-threshold = 250
+too-many-lines-threshold = 200
+
+# Documentation
+missing-docs-in-crate-items = false
+
+# Style preferences
+enum-variant-name-threshold = 3
+single-char-binding-names-threshold = 4
+
+# Performance
+vec-box-size-threshold = 4096
+
+# Allow certain patterns common in this codebase
+# (these can be adjusted based on project needs)

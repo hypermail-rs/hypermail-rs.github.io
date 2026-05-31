@@ -1,0 +1,1109 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="hypermail-rs — Rust rewrite of Hypermail. Converts UNIX mbox files into cross-referenced, browsable HTML archives. Drop-in replacement for C hypermail 2.4.0.">
+  <meta name="author" content="Akis Karnouskos">
+  <meta property="og:title" content="hypermail-rs">
+  <meta property="og:description" content="Converts UNIX mbox files to cross-referenced HTML archives. Written in safe Rust.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://hypermail-rs.github.io">
+  <meta name="theme-color" content="#1e1b4b">
+  <title>hypermail-rs — mbox to HTML archive converter</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+  <style>
+    /* ═══════════════════════════════════════════
+       TOKENS
+    ═══════════════════════════════════════════ */
+    :root {
+      --font-ui:      'Space Grotesk', system-ui, sans-serif;
+      --font-mono:    'JetBrains Mono', 'Courier New', monospace;
+
+      /* light */
+      --bg:           #ffffff;
+      --bg-subtle:    #f8f7ff;
+      --bg-code:      #f3f2fb;
+      --bg-sidebar:   #1e1b4b;   /* deep indigo */
+      --bg-hero:      #1e1b4b;
+      --text:         #111118;
+      --text-mid:     #3d3d56;
+      --text-muted:   #6b6b85;
+      --text-sidebar: #e0dff8;
+      --text-sidebar-muted: #8884b8;
+      --accent:       #6d28d9;   /* violet */
+      --accent-light: #ede9fe;
+      --accent-hover: #5b21b6;
+      --green:        #059669;   /* emerald — for callouts/badges */
+      --green-bright: #4ade80;   /* on dark bg only */
+      --border:       #e5e4f0;
+      --border-mid:   #c4c2e0;
+      --link:         #5b21b6;
+      --link-hover:   #3730a3;
+      --focus:        #6d28d9;
+      --sidebar-w:    252px;
+      --content-max:  760px;
+      --radius:       4px;
+    }
+
+    [data-theme="dark"] {
+      --bg:           #0f0e1a;
+      --bg-subtle:    #16142a;
+      --bg-code:      #1a1830;
+      --bg-sidebar:   #0a0916;
+      --bg-hero:      #0a0916;
+      --text:         #eeedf8;
+      --text-mid:     #b8b6d8;
+      --text-muted:   #7a78a0;
+      --text-sidebar: #d4d2f0;
+      --text-sidebar-muted: #5a587a;
+      --accent:       #a78bfa;
+      --accent-light: #2e2450;
+      --accent-hover: #c4b5fd;
+      --green:        #34d399;
+      --green-bright: #4ade80;
+      --border:       #252340;
+      --border-mid:   #3a3860;
+      --link:         #a78bfa;
+      --link-hover:   #c4b5fd;
+      --focus:        #a78bfa;
+    }
+
+    /* ═══════════════════════════════════════════
+       RESET
+    ═══════════════════════════════════════════ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { font-size: 18px; scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--font-ui);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+      min-height: 100vh;
+    }
+
+    /* ═══════════════════════════════════════════
+       SKIP LINK
+    ═══════════════════════════════════════════ */
+    .skip-link {
+      position: absolute;
+      top: -4rem;
+      left: 0.5rem;
+      z-index: 9999;
+      padding: 0.5rem 1rem;
+      background: var(--focus);
+      color: #fff;
+      font-family: var(--font-ui);
+      font-size: 0.875rem;
+      font-weight: 600;
+      text-decoration: none;
+      border-radius: 0 0 var(--radius) var(--radius);
+    }
+    .skip-link:focus { top: 0; outline: 3px solid #fff; }
+
+    /* ═══════════════════════════════════════════
+       LAYOUT SHELL
+    ═══════════════════════════════════════════ */
+    .shell {
+      display: flex;
+      min-height: 100vh;
+    }
+
+    /* ── Sidebar ──────────────────────────────── */
+    .sidebar {
+      width: var(--sidebar-w);
+      flex-shrink: 0;
+      background: var(--bg-sidebar);
+      display: flex;
+      flex-direction: column;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+      scrollbar-width: thin;
+    }
+
+    .sb-brand {
+      padding: 1.75rem 1.25rem 1.25rem;
+      border-bottom: 1px solid rgba(255,255,255,0.07);
+    }
+
+    .sb-brand a {
+      display: block;
+      text-decoration: none;
+      color: #fff;
+    }
+    .sb-brand a:focus-visible {
+      outline: 2px solid var(--green-bright);
+      outline-offset: 3px;
+      border-radius: var(--radius);
+    }
+
+    /* Logo: terminal prompt glyph + name */
+    .logo-mark {
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: var(--green-bright);
+      letter-spacing: 0.05em;
+      line-height: 1;
+      margin-bottom: 0.35rem;
+    }
+
+    .logo-name {
+      font-family: var(--font-ui);
+      font-size: 1.45rem;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: -0.01em;
+      line-height: 1.1;
+    }
+
+    .sb-tagline {
+      font-size: 0.75rem;
+      color: var(--text-sidebar-muted);
+      margin-top: 0.4rem;
+      line-height: 1.4;
+    }
+
+    .sb-version {
+      display: inline-block;
+      margin-top: 0.65rem;
+      padding: 0.15rem 0.55rem;
+      background: rgba(109,40,217,0.35);
+      border: 1px solid rgba(167,139,250,0.4);
+      color: var(--green-bright);
+      font-family: var(--font-mono);
+      font-size: 0.68rem;
+      letter-spacing: 0.08em;
+      border-radius: var(--radius);
+    }
+
+    .sb-nav {
+      flex: 1;
+      padding: 0.75rem 0 1rem;
+    }
+
+    .sb-nav ul { list-style: none; }
+
+    .sb-nav .nav-group {
+      font-size: 0.65rem;
+      font-weight: 600;
+      letter-spacing: 0.13em;
+      text-transform: uppercase;
+      color: var(--text-sidebar-muted);
+      padding: 1rem 1.25rem 0.3rem;
+    }
+
+    .sb-nav li a {
+      display: block;
+      padding: 0.32rem 1.25rem;
+      font-size: 0.84rem;
+      font-weight: 400;
+      color: var(--text-sidebar);
+      text-decoration: none;
+      border-left: 2px solid transparent;
+      transition: background 0.1s, border-color 0.1s, color 0.1s;
+    }
+    .sb-nav li a:hover,
+    .sb-nav li a:focus {
+      background: rgba(255,255,255,0.05);
+      border-left-color: var(--green-bright);
+      color: #fff;
+      outline: none;
+    }
+    .sb-nav li a:focus-visible {
+      outline: 2px solid var(--green-bright);
+      outline-offset: -2px;
+    }
+
+    .sb-footer {
+      padding: 1rem 1.25rem;
+      border-top: 1px solid rgba(255,255,255,0.07);
+      font-size: 0.73rem;
+      color: var(--text-sidebar-muted);
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .sb-footer a {
+      color: var(--text-sidebar-muted);
+      text-decoration: none;
+    }
+    .sb-footer a:hover { color: #fff; }
+    .sb-footer a:focus-visible {
+      outline: 2px solid var(--green-bright);
+      outline-offset: 2px;
+      border-radius: 2px;
+    }
+
+    /* Theme toggle */
+    .theme-btn {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.12);
+      color: var(--text-sidebar);
+      font-family: var(--font-ui);
+      font-size: 0.75rem;
+      padding: 0.35rem 0.75rem;
+      cursor: pointer;
+      border-radius: var(--radius);
+      text-align: left;
+      width: 100%;
+      transition: background 0.1s;
+    }
+    .theme-btn:hover { background: rgba(255,255,255,0.1); }
+    .theme-btn:focus-visible {
+      outline: 2px solid var(--green-bright);
+      outline-offset: 2px;
+    }
+
+    /* ── Content area ─────────────────────────── */
+    .content {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ═══════════════════════════════════════════
+       HERO
+    ═══════════════════════════════════════════ */
+    .hero {
+      background: var(--bg-hero);
+      padding: 3rem 2.5rem 2.75rem;
+      border-bottom: 3px solid var(--accent);
+    }
+
+    .hero-inner { max-width: var(--content-max); }
+
+    /* Hero logo — no ASCII art, just clean type */
+    .hero-prompt {
+      font-family: var(--font-mono);
+      font-size: 0.9rem;
+      color: var(--green-bright);
+      letter-spacing: 0.04em;
+      margin-bottom: 0.6rem;
+      display: block;
+    }
+
+    .hero-title {
+      font-family: var(--font-ui);
+      font-size: clamp(2.2rem, 5vw, 3.2rem);
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: -0.02em;
+      line-height: 1.1;
+    }
+
+    .hero-title span {
+      color: var(--green-bright);
+    }
+
+    .hero-sub {
+      margin-top: 1rem;
+      font-size: 1rem;
+      color: #b8b6d8;
+      max-width: 520px;
+      line-height: 1.65;
+    }
+
+    .hero-sub strong { color: #fff; font-weight: 500; }
+
+    .hero-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      margin-top: 1.25rem;
+    }
+
+    .chip {
+      display: inline-block;
+      padding: 0.18rem 0.6rem;
+      font-size: 0.72rem;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      border-radius: 2px;
+      border: 1px solid rgba(255,255,255,0.15);
+      color: #b8b6d8;
+    }
+    .chip-violet {
+      border-color: rgba(167,139,250,0.5);
+      color: #c4b5fd;
+    }
+    .chip-green {
+      border-color: rgba(74,222,128,0.4);
+      color: var(--green-bright);
+    }
+
+    .hero-cta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      margin-top: 1.75rem;
+    }
+
+    .btn {
+      display: inline-block;
+      padding: 0.55rem 1.3rem;
+      font-family: var(--font-ui);
+      font-size: 0.875rem;
+      font-weight: 600;
+      text-decoration: none;
+      border-radius: var(--radius);
+      border: 2px solid transparent;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+      line-height: 1;
+    }
+    .btn:focus-visible {
+      outline: 3px solid var(--green-bright);
+      outline-offset: 3px;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+    .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--green-bright);
+      border-color: rgba(74,222,128,0.5);
+    }
+    .btn-ghost:hover { background: rgba(74,222,128,0.08); border-color: var(--green-bright); }
+
+    /* ═══════════════════════════════════════════
+       MAIN CONTENT TYPOGRAPHY
+    ═══════════════════════════════════════════ */
+    main {
+      flex: 1;
+      padding: 2.5rem 2.5rem 5rem;
+    }
+
+    .main-inner { max-width: var(--content-max); }
+
+    section { margin-bottom: 3rem; }
+
+    h2 {
+      font-family: var(--font-ui);
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: var(--text);
+      margin: 0 0 1rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 2px solid var(--border);
+      letter-spacing: -0.01em;
+    }
+
+    h3 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: var(--text-mid);
+      margin: 1.5rem 0 0.5rem;
+    }
+
+    p {
+      font-size: 1.05rem;
+      color: var(--text-mid);
+      margin-bottom: 0.8rem;
+      line-height: 1.72;
+    }
+
+    strong { font-weight: 600; color: var(--text); }
+
+    a {
+      color: var(--link);
+      text-decoration: underline;
+      text-underline-offset: 3px;
+      text-decoration-thickness: 1px;
+    }
+    a:hover { color: var(--link-hover); }
+    a:focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
+      border-radius: 2px;
+    }
+
+    code {
+      font-family: var(--font-mono);
+      font-size: 0.92em;
+      background: var(--bg-code);
+      color: var(--text);
+      padding: 0.1em 0.4em;
+      border-radius: 3px;
+      border: 1px solid var(--border);
+    }
+
+    /* ═══════════════════════════════════════════
+       CODE BLOCKS
+    ═══════════════════════════════════════════ */
+    .codeblock {
+      position: relative;
+      background: var(--bg-code);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      padding: 1rem 1.25rem;
+      margin: 0.5rem 0 1.25rem;
+      overflow-x: auto;
+      font-size: 0.95rem;
+      line-height: 1.65;
+    }
+
+    .codeblock pre { font-family: var(--font-mono); white-space: pre; }
+
+    .codeblock code {
+      background: none;
+      border: none;
+      padding: 0;
+      color: var(--text);
+      font-size: inherit;
+    }
+
+    .codeblock .tag {
+      position: absolute;
+      top: 0.35rem;
+      right: 0.75rem;
+      font-family: var(--font-mono);
+      font-size: 0.62rem;
+      letter-spacing: 0.1em;
+      color: var(--text-muted);
+    }
+
+    .cmt { color: var(--text-muted); }
+
+    /* ═══════════════════════════════════════════
+       CALLOUT
+    ═══════════════════════════════════════════ */
+    .callout {
+      border-left: 3px solid var(--green);
+      background: var(--bg-subtle);
+      padding: 0.8rem 1.1rem;
+      border-radius: 0 var(--radius) var(--radius) 0;
+      margin: 0.5rem 0 1.25rem;
+    }
+    .callout p { margin: 0; font-size: 1rem; }
+
+    /* ═══════════════════════════════════════════
+       FEATURE GRID
+    ═══════════════════════════════════════════ */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+      gap: 1rem;
+      margin: 0.75rem 0 1rem;
+    }
+
+    .card {
+      padding: 1rem 1.1rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--bg-subtle);
+      transition: border-color 0.15s;
+    }
+    .card:hover { border-color: var(--accent); }
+
+    .card-title {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 0.35rem;
+    }
+
+    .card p {
+      font-size: 0.95rem;
+      color: var(--text-muted);
+      margin: 0;
+      line-height: 1.55;
+    }
+
+    /* ═══════════════════════════════════════════
+       TABLES (CLI flags, config)
+    ═══════════════════════════════════════════ */
+    .tbl-wrap {
+      overflow-x: auto;
+      margin: 0.5rem 0 1.5rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.95rem;
+    }
+
+    thead {
+      background: var(--bg-sidebar);
+      color: var(--text-sidebar);
+    }
+
+    th {
+      padding: 0.55rem 1rem;
+      text-align: left;
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    td {
+      padding: 0.45rem 1rem;
+      border-top: 1px solid var(--border);
+      vertical-align: top;
+      line-height: 1.55;
+      color: var(--text-mid);
+    }
+
+    tr:hover td { background: var(--bg-subtle); }
+
+    td:first-child,
+    td:nth-child(2) {
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      color: var(--text-mid);
+      white-space: nowrap;
+    }
+
+    /* ═══════════════════════════════════════════
+       DOWNLOAD SECTION
+    ═══════════════════════════════════════════ */
+    .dl-card {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.25rem 1.4rem;
+      background: var(--bg-subtle);
+      margin-bottom: 1rem;
+    }
+
+    .dl-card h3 {
+      margin: 0 0 0.5rem;
+      font-size: 1.15rem;
+      color: var(--text);
+    }
+
+    .dl-card p {
+      font-size: 1rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .dl-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.5rem 1rem;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 600;
+      font-size: 0.95rem;
+      text-decoration: none;
+      border-radius: var(--radius);
+      border: 2px solid var(--accent);
+      transition: background 0.15s;
+    }
+    .dl-link:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: #fff; }
+    .dl-link:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+
+    .dl-secondary {
+      display: inline-block;
+      margin-left: 0.75rem;
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      text-decoration: none;
+    }
+    .dl-secondary:hover { color: var(--link); }
+
+    .dl-note {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      margin-top: 0.5rem;
+    }
+
+    /* ═══════════════════════════════════════════
+       FOOTER
+    ═══════════════════════════════════════════ */
+    .site-footer {
+      background: var(--bg-sidebar);
+      color: var(--text-sidebar-muted);
+      padding: 1rem 2.5rem;
+      font-size: 0.78rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.25rem 1.5rem;
+      align-items: center;
+    }
+    .site-footer a { color: var(--text-sidebar-muted); text-decoration: none; }
+    .site-footer a:hover { color: #fff; }
+    .site-footer a:focus-visible { outline: 2px solid var(--green-bright); outline-offset: 2px; }
+
+    /* ═══════════════════════════════════════════
+       RESPONSIVE
+    ═══════════════════════════════════════════ */
+    @media (max-width: 780px) {
+      .shell { flex-direction: column; }
+
+      .sidebar {
+        width: 100%;
+        height: auto;
+        position: static;
+        flex-direction: row;
+        align-items: center;
+        padding: 0.6rem 1rem;
+        gap: 1rem;
+      }
+
+      .sb-brand { padding: 0; border: none; }
+      .sb-tagline, .sb-version, .sb-footer, .sb-nav .nav-group { display: none; }
+
+      .sb-nav { flex: 0; padding: 0; }
+      .sb-nav ul { display: flex; flex-wrap: wrap; }
+      .sb-nav li a {
+        padding: 0.3rem 0.5rem;
+        border-left: none;
+        border-bottom: 2px solid transparent;
+        font-size: 0.8rem;
+      }
+      .sb-nav li a:hover, .sb-nav li a:focus {
+        border-bottom-color: var(--green-bright);
+        background: none;
+      }
+
+      .hero { padding: 1.75rem 1.25rem; }
+      main { padding: 1.5rem 1.25rem 3rem; }
+      .site-footer { padding: 1rem 1.25rem; }
+    }
+
+    @media (max-width: 480px) {
+      .hero-title { font-size: 1.9rem; }
+      .grid { grid-template-columns: 1fr; }
+      .hero-cta { flex-direction: column; align-items: flex-start; }
+    }
+
+    /* ═══════════════════════════════════════════
+       REDUCED MOTION
+    ═══════════════════════════════════════════ */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+      }
+      html { scroll-behavior: auto; }
+    }
+
+    /* ═══════════════════════════════════════════
+       HIGH CONTRAST
+    ═══════════════════════════════════════════ */
+    @media (prefers-contrast: more) {
+      :root {
+        --text: #000; --text-mid: #111; --text-muted: #333;
+        --bg: #fff; --bg-subtle: #f0f0f0; --bg-code: #e8e8e8;
+        --border: #000; --link: #00008b; --accent: #4a00b0;
+      }
+      [data-theme="dark"] {
+        --text: #fff; --text-mid: #eee; --text-muted: #ccc;
+        --bg: #000; --bg-subtle: #111; --bg-code: #1a1a1a;
+        --border: #fff; --link: #aaccff; --accent: #c4b5fd;
+      }
+    }
+
+    /* ═══════════════════════════════════════════
+       PRINT
+    ═══════════════════════════════════════════ */
+    @media print {
+      .sidebar, .site-footer, .hero-cta, .theme-btn { display: none; }
+      .shell { display: block; }
+      body { background: #fff; color: #000; }
+      .hero { background: #fff; border-bottom: 2px solid #000; padding: 1rem 0; }
+      .hero-title, .hero-sub, .hero-prompt { color: #000; }
+      a { color: #000; }
+    }
+  </style>
+</head>
+
+<body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+
+  <div class="shell">
+
+    <!-- ════════════════════════════════════════
+         SIDEBAR
+    ════════════════════════════════════════ -->
+    <nav class="sidebar" aria-label="Site navigation">
+
+      <div class="sb-brand">
+        <a href="#top" aria-label="hypermail-rs — go to top">
+          <div class="logo-mark">&gt;_</div>
+          <div class="logo-name">hypermail-rs</div>
+        </a>
+        <div class="sb-tagline">mbox → HTML archive converter</div>
+        <div class="sb-version" aria-label="Source repository">
+          <a href="https://github.com/hypermail-rs/hypermail-rs.github.io"
+             rel="noopener noreferrer" style="color:inherit;text-decoration:none;">GitHub repo ↗</a>
+        </div>
+      </div>
+
+      <div class="sb-nav">
+        <ul>
+          <li class="nav-group" role="presentation" aria-hidden="true">Getting started</li>
+          <li><a href="#about">About</a></li>
+          <li><a href="#install">Installation</a></li>
+          <li><a href="#usage">Usage</a></li>
+          <li class="nav-group" role="presentation" aria-hidden="true">Reference</li>
+          <li><a href="#cli">CLI flags</a></li>
+          <li><a href="#config">Config file</a></li>
+          <li><a href="#features">Features</a></li>
+          <li><a href="api-docs/hypermail/">API docs ↗</a></li>
+          <li class="nav-group" role="presentation" aria-hidden="true">Distribution</li>
+          <li><a href="#download">Download</a></li>
+          <li><a href="https://github.com/hypermail-rs/hypermail-rs.github.io" rel="noopener noreferrer">GitHub ↗</a></li>
+          <li><a href="https://github.com/hypermail-rs/hypermail-rs.github.io/issues" rel="noopener noreferrer">Issues ↗</a></li>
+        </ul>
+      </div>
+
+      <div class="sb-footer">
+        <button class="theme-btn" id="theme-btn"
+                aria-pressed="false" aria-label="Toggle dark mode">
+          <span id="theme-icon" aria-hidden="true">◑</span>
+          <span id="theme-lbl"> Dark mode</span>
+        </button>
+        <div>
+          <a href="https://github.com/hypermail-rs/hypermail-rs.github.io/blob/main/LICENSE"
+             rel="noopener noreferrer">GPL-2.0-or-later</a>
+        </div>
+      </div>
+
+    </nav>
+
+    <!-- ════════════════════════════════════════
+         CONTENT
+    ════════════════════════════════════════ -->
+    <div class="content">
+
+      <!-- HERO -->
+      <header class="hero" id="top" role="banner">
+        <div class="hero-inner">
+          <span class="hero-prompt" aria-hidden="true">~/mail $</span>
+          <h1 class="hero-title">hypermail<span>-rs</span></h1>
+          <p class="hero-sub">
+            A complete <strong>Rust rewrite</strong> of Hypermail — converts UNIX mbox files
+            into cross-referenced, browsable HTML archives. Drop-in replacement for
+            C hypermail 2.4.0.
+          </p>
+          <div class="hero-meta" aria-label="Project metadata">
+            <span class="chip chip-green">Rust</span>
+            <span class="chip">GPL-2.0-or-later</span>
+            <span class="chip">Linux · macOS · Windows</span>
+          </div>
+          <div class="hero-cta">
+            <a class="btn btn-primary" href="#install">Get started</a>
+            <a class="btn btn-ghost"
+               href="https://github.com/hypermail-rs/hypermail-rs.github.io"
+               rel="noopener noreferrer">View on GitHub</a>
+          </div>
+        </div>
+      </header>
+
+      <!-- MAIN -->
+      <main id="main" tabindex="-1">
+        <div class="main-inner">
+
+          <!-- ABOUT -->
+          <section id="about" aria-labelledby="h-about">
+            <h2 id="h-about">About</h2>
+            <p>
+              <strong>hypermail-rs</strong> reads one or more UNIX mbox files (or stdin) and
+              produces a set of interlinked HTML pages: one page per email message, plus index
+              pages sorted by date, subject, author, and thread. It is a
+              <a href="https://www.hypermail-project.org/" rel="noopener noreferrer">C hypermail 2.4.0</a>
+              drop-in replacement — same <code>.hmrc</code> config format, same CLI flags,
+              existing scripts work without modification.
+            </p>
+            <p>
+              Written in safe Rust with no C dependencies. New additions include
+              multilingual support, extended MIME handling, dark/light mode on generated pages,
+              and a full-text search index.
+            </p>
+            <div class="callout" role="note" aria-label="Attribution">
+              <p>
+                Based on the original Hypermail by Tom Gruber, Kevin Hughes,
+                Kent Landfield, Peter McCluskey and other contributors.
+                Rust rewrite and maintainer Akis Karnouskos.
+              </p>
+            </div>
+          </section>
+
+          <!-- INSTALL -->
+          <section id="install" aria-labelledby="h-install">
+            <h2 id="h-install">Installation</h2>
+
+            <h3>From source</h3>
+            <div class="codeblock" role="region" aria-label="Build from source">
+              <span class="tag" aria-hidden="true">SHELL</span>
+              <pre><code>git clone https://github.com/hypermail-rs/hypermail-rs.github.io.git
+cd hypermail-rs.github.io
+cargo build --release
+<span class="cmt"># binary: target/release/hypermail</span></code></pre>
+            </div>
+
+            <div class="callout" role="note" aria-label="Requirement">
+              <p>Requires a recent stable <strong>Rust</strong> toolchain. No external C libraries. See <a href="https://github.com/hypermail-rs/hypermail-rs.github.io#building-from-source" rel="noopener noreferrer">build requirements</a>.</p>
+            </div>
+          </section>
+
+          <!-- USAGE -->
+          <section id="usage" aria-labelledby="h-usage">
+            <h2 id="h-usage">Usage</h2>
+
+            <h3>Common commands</h3>
+            <div class="codeblock" role="region" aria-label="Common usage examples">
+              <span class="tag" aria-hidden="true">SHELL</span>
+              <pre><code><span class="cmt"># Convert a mailbox to an HTML archive</span>
+hypermail -m mailbox.mbox -d output/ -l "My Archive"
+
+<span class="cmt"># Use a config file</span>
+hypermail -c archive.hmrc
+
+<span class="cmt"># Read from stdin (pipe from fetchmail, procmail, etc.)</span>
+cat mailbox.mbox | hypermail -i -d output/ -l "Archive"
+
+<span class="cmt"># Incremental update — append new messages only</span>
+hypermail -u -m new.mbox -d output/
+
+<span class="cmt"># Overwrite an existing archive completely</span>
+hypermail -x -m mailbox.mbox -d output/ -l "Fresh Archive"
+
+<span class="cmt"># Print version / show all config values</span>
+hypermail -V
+hypermail -v -c archive.hmrc</code></pre>
+            </div>
+          </section>
+
+          <!-- CLI FLAGS -->
+          <section id="cli" aria-labelledby="h-cli">
+            <h2 id="h-cli">CLI flags</h2>
+            <p>All flags are compatible with the original C hypermail 2.4.0.</p>
+            <div class="tbl-wrap" role="region" aria-label="CLI flags reference">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Short</th>
+                    <th scope="col">Long</th>
+                    <th scope="col">Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td>-a</td><td>--archives</td><td>URL for "Other mail archives" link</td></tr>
+                  <tr><td>-A</td><td>--append</td><td>Append mbox output to a parallel mailbox file</td></tr>
+                  <tr><td>-b</td><td>--about</td><td>URL for "About this archive" link</td></tr>
+                  <tr><td>-c</td><td>--config</td><td>Configuration file (.hmrc)</td></tr>
+                  <tr><td>-d</td><td>--dir</td><td>Output directory</td></tr>
+                  <tr><td>-g</td><td>--gdbm</td><td>Enable <code>.hm2index</code> header cache</td></tr>
+                  <tr><td>-i</td><td>--stdin</td><td>Read from standard input</td></tr>
+                  <tr><td>-l</td><td>--label</td><td>Archive title</td></tr>
+                  <tr><td>-L</td><td>--language</td><td>Language code, e.g. <code>en</code>, <code>de</code>, <code>ja</code></td></tr>
+                  <tr><td>-m</td><td>--mbox</td><td>Input mailbox file</td></tr>
+                  <tr><td>-M</td><td>--metadata</td><td>Use metadata files for attachments</td></tr>
+                  <tr><td>-n</td><td>--hmail</td><td>List submission address</td></tr>
+                  <tr><td>-N</td><td>--nonsequential</td><td>Hash-based filenames</td></tr>
+                  <tr><td>-o</td><td>--set</td><td>Set a config option, e.g. <code>-o showhtml=2</code></td></tr>
+                  <tr><td>-p</td><td>--progress</td><td>Show animated progress bar</td></tr>
+                  <tr><td>-s</td><td>--suffix</td><td>HTML file suffix (default: <code>html</code>)</td></tr>
+                  <tr><td>-T</td><td>--indextables</td><td>Use tables for index pages</td></tr>
+                  <tr><td>-u</td><td>--update</td><td>Incremental update</td></tr>
+                  <tr><td>-v</td><td>--verbose</td><td>Print all config variable values and exit</td></tr>
+                  <tr><td>-V</td><td>--version</td><td>Print version and exit</td></tr>
+                  <tr><td>-x</td><td>--overwrite</td><td>Overwrite existing message files</td></tr>
+                  <tr><td>-X</td><td>--xml</td><td>Write HAOF XML archive overview</td></tr>
+                  <tr><td>-1</td><td>--readone</td><td>Single message in input</td></tr>
+                  <tr><td></td><td>--no-generator</td><td>Suppress "Generated by hypermail-rs" footer</td></tr>
+                  <tr><td></td><td>--warnings</td><td>Show configuration warnings</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <!-- CONFIG -->
+          <section id="config" aria-labelledby="h-config">
+            <h2 id="h-config">Config file</h2>
+            <p>
+              hypermail-rs reads <code>.hmrc</code> files in the same format as the original
+              C hypermail. CLI <code>-o key=value</code> overrides file settings.
+            </p>
+
+            <h3>Example <code>archive.hmrc</code></h3>
+            <div class="codeblock" role="region" aria-label="Example .hmrc config">
+              <span class="tag" aria-hidden="true">.HMRC</span>
+              <pre><code>mbox           = /var/mail/list.mbox
+dir            = /var/www/archive/
+label          = Development Mailing List
+language       = en
+defaultindex   = thread
+overwrite      = 1
+spamprotect    = 1
+showhtml       = 2
+indextable     = 1
+folder_by_date = %Y-%m
+monthly_index  = 1</code></pre>
+            </div>
+
+            <h3>Key options</h3>
+            <div class="tbl-wrap" role="region" aria-label="Config options reference">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Option</th>
+                    <th scope="col">Type</th>
+                    <th scope="col">Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td>mbox</td><td>string</td><td>Path to input mailbox</td></tr>
+                  <tr><td>dir</td><td>string</td><td>Output directory</td></tr>
+                  <tr><td>label</td><td>string</td><td>Archive title shown in pages</td></tr>
+                  <tr><td>language</td><td>string</td><td>UI language code (189 supported)</td></tr>
+                  <tr><td>defaultindex</td><td>string</td><td><code>date</code> · <code>subject</code> · <code>author</code> · <code>thread</code></td></tr>
+                  <tr><td>overwrite</td><td>bool</td><td>Overwrite existing message files</td></tr>
+                  <tr><td>spamprotect</td><td>bool</td><td>Obfuscate email addresses in output</td></tr>
+                  <tr><td>showhtml</td><td>int</td><td>HTML parts: 0 = strip · 1 = proportional · 2 = full</td></tr>
+                  <tr><td>folder_by_date</td><td>string</td><td>Date-based subfolders (strftime format)</td></tr>
+                  <tr><td>msgsperfolder</td><td>int</td><td>Max messages per subdirectory</td></tr>
+                  <tr><td>usegdbm</td><td>bool</td><td>Enable <code>.hm2index</code> header cache</td></tr>
+                  <tr><td>monthly_index</td><td>bool</td><td>Per-month summary index pages</td></tr>
+                  <tr><td>yearly_index</td><td>bool</td><td>Per-year summary index pages</td></tr>
+                  <tr><td>linkquotes</td><td>bool</td><td>Link quoted text back to originals</td></tr>
+                  <tr><td>nonsequential</td><td>bool</td><td>Hash-based filenames</td></tr>
+                  <tr><td>htmlheaderfile</td><td>string</td><td>Path to HTML header file used for all pages (shorthand for <code>ihtmlheaderfile</code> + <code>mhtmlheaderfile</code>)</td></tr>
+                  <tr><td>htmlfooterfile</td><td>string</td><td>Path to HTML footer file used for all pages (shorthand for <code>ihtmlfooterfile</code> + <code>mhtmlfooterfile</code>)</td></tr>
+                  <tr><td>ihtmlheaderfile</td><td>string</td><td>Path to custom HTML header file for index pages</td></tr>
+                  <tr><td>ihtmlfooterfile</td><td>string</td><td>Path to custom HTML footer file for index pages</td></tr>
+                  <tr><td>mhtmlheaderfile</td><td>string</td><td>Path to custom HTML header file for message pages</td></tr>
+                  <tr><td>mhtmlfooterfile</td><td>string</td><td>Path to custom HTML footer file for message pages</td></tr>
+                  <tr><td><s>showhr</s></td><td>—</td><td>Deprecated — has no effect. Remove from your config file.</td></tr>
+                  <tr><td><s>usetable</s></td><td>—</td><td>Deprecated — has no effect. Remove from your config file.</td></tr>
+                  <tr><td><s>body</s></td><td>—</td><td>Deprecated — has no effect. Remove from your config file.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <!-- FEATURES -->
+          <section id="features" aria-labelledby="h-features">
+            <h2 id="h-features">Features</h2>
+            <div class="grid" role="list">
+              <article class="card" role="listitem">
+                <div class="card-title">Safe Rust</div>
+                <p>No buffer overflows, zero C dependencies, clean <code>cargo audit</code>.</p>
+              </article>
+              <article class="card" role="listitem">
+                <div class="card-title">189 languages</div>
+                <p>All ISO 639-1/2 codes plus IETF BCP 47 private-use subtags, compiled in at build time.</p>
+              </article>
+              <article class="card" role="listitem">
+                <div class="card-title">Full MIME</div>
+                <p>RFC 2047 headers, RFC 2231 filenames, RFC 3676 format=flowed, multipart.</p>
+              </article>
+              <article class="card" role="listitem">
+                <div class="card-title">Smart threading</div>
+                <p>Two-pass algorithm: header-based plus subject heuristics for maximum thread coverage.</p>
+              </article>
+              <article class="card" role="listitem">
+                <div class="card-title">Security</div>
+                <p>HTML escaping, CSP meta tags, MIME allowlist, path traversal protection.</p>
+              </article>
+              <article class="card" role="listitem">
+                <div class="card-title">Accessible output</div>
+                <p>Dark/light mode, ARIA landmarks, skip links, responsive layout on every archive page.</p>
+              </article>
+              <article class="card" role="listitem">
+                <div class="card-title">Fast incremental</div>
+                <p><code>.hm2index</code> cache — append messages without rebuilding the full archive.</p>
+              </article>
+              <article class="card" role="listitem">
+                <div class="card-title">Thoroughly tested</div>
+                <p>Extensive test suite validated on large real-world mbox corpora. CI on Linux, macOS, Windows.</p>
+              </article>
+            </div>
+          </section>
+
+          <!-- DOWNLOAD -->
+          <section id="download" aria-labelledby="h-download">
+            <h2 id="h-download">Download</h2>
+
+            <div class="dl-card">
+              <h3>Source repository</h3>
+              <p>Clone and build from the GitHub repository. Pre-built binaries will be published on GitHub Releases when available.</p>
+              <a class="dl-link"
+                 href="https://github.com/hypermail-rs/hypermail-rs.github.io"
+                 rel="noopener noreferrer">
+                View on GitHub ↗
+              </a>
+            </div>
+
+            <div class="dl-card">
+              <h3>From source</h3>
+              <p>Clone and build with <code>cargo</code>. Requires Rust 1.91+.</p>
+              <div class="codeblock" style="margin:0" role="region" aria-label="Build from source">
+                <pre><code>git clone https://github.com/hypermail-rs/hypermail-rs.github.io.git
+cd hypermail-rs.github.io
+cargo build --release</code></pre>
+              </div>
+            </div>
+
+          </section>
+
+        </div>
+      </main>
+
+      <!-- FOOTER -->
+      <footer class="site-footer" role="contentinfo">
+        <span>
+          <a href="https://github.com/hypermail-rs/hypermail-rs.github.io" rel="noopener noreferrer">GitHub</a>
+        </span>
+        <span>
+          <a href="https://github.com/hypermail-rs/hypermail-rs.github.io/issues" rel="noopener noreferrer">Issues</a>
+        </span>
+
+        <span>
+          <a href="https://github.com/hypermail-rs/hypermail-rs.github.io/blob/main/LICENSE"
+             rel="noopener noreferrer">GPL-2.0-or-later</a>
+        </span>
+      </footer>
+
+    </div><!-- /.content -->
+  </div><!-- /.shell -->
+
+  <script>
+    (function () {
+      'use strict';
+      var html = document.documentElement;
+      var btn  = document.getElementById('theme-btn');
+      var icon = document.getElementById('theme-icon');
+      var lbl  = document.getElementById('theme-lbl');
+      var stored = localStorage.getItem('hm-theme');
+      var sys    = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      set(stored || (sys ? 'dark' : 'light'), false);
+      btn.addEventListener('click', function () {
+        set(html.dataset.theme === 'dark' ? 'light' : 'dark', true);
+      });
+      function set(t, save) {
+        html.dataset.theme = t;
+        var dark = t === 'dark';
+        btn.setAttribute('aria-pressed', String(dark));
+        icon.textContent = dark ? '○' : '◑';
+        lbl.textContent  = dark ? ' Light mode' : ' Dark mode';
+        if (save) localStorage.setItem('hm-theme', t);
+      }
+    }());
+  </script>
+
+</body>
+</html>

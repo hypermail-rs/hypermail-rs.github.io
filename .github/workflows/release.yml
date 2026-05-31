@@ -1,0 +1,115 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  CARGO_TERM_COLOR: always
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x86_64 — glibc (requires glibc >= 2.17)
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: hypermail-${{ github.ref_name }}-x86_64-linux.tar.gz
+          # Linux x86_64 — musl static (no glibc dependency, runs anywhere)
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            archive: hypermail-${{ github.ref_name }}-x86_64-linux-static.tar.gz
+          # Linux ARM64 (Raspberry Pi 4/5, AWS Graviton, etc.)
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            archive: hypermail-${{ github.ref_name }}-aarch64-linux.tar.gz
+          # macOS Intel
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            archive: hypermail-${{ github.ref_name }}-x86_64-macos.tar.gz
+          # macOS Apple Silicon
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            archive: hypermail-${{ github.ref_name }}-aarch64-macos.tar.gz
+          # Windows x86_64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: hypermail-${{ github.ref_name }}-x86_64-windows.zip
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: ${{ matrix.target }}
+
+      - name: Install musl tools (Linux musl target)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get install -y musl-tools
+
+      - name: Install cross-compilation tools (aarch64 Linux)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+
+      - name: Package (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf ../../../${{ matrix.archive }} hypermail
+          cd ../../..
+
+      - name: Package (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          cd target/${{ matrix.target }}/release
+          Compress-Archive -Path hypermail.exe -DestinationPath ../../../${{ matrix.archive }}
+          cd ../../..
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.archive }}
+          path: ${{ matrix.archive }}
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v8
+        with:
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: sha256sum hypermail-*.tar.gz hypermail-*.zip > SHA256SUMS.txt
+
+      - name: Create release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            hypermail-*.tar.gz
+            hypermail-*.zip
+            SHA256SUMS.txt
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}

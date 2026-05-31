@@ -1,0 +1,25 @@
+/target
+.hm_lock
+*.DS_Store
+
+# Generated archive output
+haof.xml
+*.hm2index
+files/
+
+# Generated documentation (built by CI)
+docs/api-docs/
+
+# Editor / IDE
+.claude/
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Playwright MCP session artifacts
+.playwright-mcp/
+
+# Debug screenshots
+*.png
+

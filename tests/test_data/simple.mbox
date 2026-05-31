@@ -1,0 +1,27 @@
+From alice@example.com Mon Jan 15 12:00:00 2024
+From: Alice <alice@example.com>
+Subject: Hello World
+Message-ID: <msg001@example.com>
+Date: Mon, 15 Jan 2024 12:00:00 +0000
+
+This is the first test message.
+
+
+From bob@example.com Tue Jan 16 12:00:00 2024
+From: Bob <bob@example.com>
+Subject: Re: Hello World
+In-Reply-To: <msg001@example.com>
+Message-ID: <msg002@example.com>
+Date: Tue, 16 Jan 2024 12:00:00 +0000
+
+This is a reply to Alice.
+
+
+From carol@example.com Wed Jan 17 12:00:00 2024
+From: Carol <carol@example.com>
+Subject: Test with 
+Message-ID: <msg003@example.com>
+Date: Wed, 17 Jan 2024 12:00:00 +0000
+
+Line with  control char.
+

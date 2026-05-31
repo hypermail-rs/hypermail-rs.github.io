@@ -1,0 +1,85 @@
+name: Deploy GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Ensure only one deployment runs at a time and cancel any in-progress runs
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  # Separate build job to avoid artifact conflicts
+  build:
+    name: Build Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-doc-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build API documentation
+        run: |
+          echo "Building rustdoc documentation..."
+          RUSTDOCFLAGS="--html-in-header .rustdoc-header.html" cargo doc --no-deps --release
+          echo "Creating docs/api-docs directory..."
+          mkdir -p docs/api-docs
+          echo "Copying documentation from target/doc/ to docs/api-docs/..."
+          cp -r target/doc/* docs/api-docs/
+          echo "Documentation copied successfully"
+
+      - name: Verify documentation structure
+        run: |
+          echo "===== Checking docs directory structure ====="
+          ls -lh docs/
+          echo ""
+          echo "===== Checking docs/api-docs contents ====="
+          ls -lh docs/api-docs/
+          echo ""
+          echo "===== Verifying required files exist ====="
+          test -f docs/index.html || (echo "ERROR: docs/index.html not found" && exit 1)
+          echo "✓ docs/index.html exists"
+          test -f docs/api-docs/hypermail/index.html || (echo "ERROR: API docs not generated" && exit 1)
+          echo "✓ docs/api-docs/hypermail/index.html exists"
+          echo ""
+          echo "===== Documentation structure verified ====="
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: docs/
+
+  # Separate deploy job that depends on build
+  deploy:
+    name: Deploy to GitHub Pages
+    runs-on: ubuntu-latest
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

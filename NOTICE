@@ -1,0 +1,55 @@
+HYPERMAIL-RS - COPYRIGHT AND ATTRIBUTION
+=========================================
+
+Hypermail-rs - A Rust rewrite of Hypermail
+Copyright (C) 2026-present The hypermail-rs contributors
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 2 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+
+---
+
+ATTRIBUTION TO ORIGINAL HYPERMAIL
+==================================
+
+This software is inspired by and maintains configuration compatibility
+with the original Hypermail email archiver.
+
+Original Hypermail:
+  Copyright (C) 1994 Enterprise Integration Technologies Corp. (EIT)
+  Copyright (C) The Hypermail contributors
+  Licensed under GPL-2.0-or-later
+  Project page: https://www.hypermail-project.org/
+
+Original Hypermail Authors and Maintainers:
+  - Tom Gruber - Original Lisp prototype at EIT (1994)
+  - Kevin Hughes - C rewrite and initial maintainer at EIT
+  - Kent Landfield - Primary maintainer through versions 2.0-2.4
+  - Daniel Stenberg - MIME multipart, RFC 2047, trio library integration
+  - Peter McCluskey - Lead developer; linkquotes, folder_by_date, threading
+  - Jose Kahan, Stian Soiland, Jim Meyering - Major contributors
+  - and other contributors
+
+Hypermail-rs is a complete Rust rewrite with no original C code. It adds modern
+features while maintaining the spirit and configuration compatibility of the original.
+We are deeply grateful to the original Hypermail team for creating such a useful
+tool for the open-source community.
+
+---
+
+THIRD-PARTY DEPENDENCIES
+=========================
+
+This software includes dependencies distributed under various open-source
+licenses. See Cargo.toml and individual crate documentation for details.

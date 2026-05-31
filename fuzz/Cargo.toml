@@ -1,0 +1,62 @@
+[package]
+name = "hypermail-rs-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.hypermail-rs]
+path = ".."
+
+# Fuzz target: Email header parsing
+[[bin]]
+name = "fuzz_parse_headers"
+path = "fuzz_targets/fuzz_parse_headers.rs"
+test = false
+doc = false
+bench = false
+
+# Fuzz target: Email address extraction
+[[bin]]
+name = "fuzz_parse_email"
+path = "fuzz_targets/fuzz_parse_email.rs"
+test = false
+doc = false
+bench = false
+
+# Fuzz target: RFC 2047 MIME decoding
+[[bin]]
+name = "fuzz_decode_mime"
+path = "fuzz_targets/fuzz_decode_mime.rs"
+test = false
+doc = false
+bench = false
+
+# Fuzz target: HTML escaping (security-critical)
+[[bin]]
+name = "fuzz_html_escape"
+path = "fuzz_targets/fuzz_html_escape.rs"
+test = false
+doc = false
+bench = false
+
+# Fuzz target: Subject prefix stripping (ReDoS protection)
+[[bin]]
+name = "fuzz_unre"
+path = "fuzz_targets/fuzz_unre.rs"
+test = false
+doc = false
+bench = false
+
+# Fuzz target: Mbox message parsing
+[[bin]]
+name = "fuzz_mbox_parse"
+path = "fuzz_targets/fuzz_mbox_parse.rs"
+test = false
+doc = false
+bench = false

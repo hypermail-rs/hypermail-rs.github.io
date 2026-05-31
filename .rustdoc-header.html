@@ -1,0 +1,125 @@
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Custom theme to match hypermail-rs.github.io with WCAG AA compliance */
+:root {
+  /* Main content */
+  --main-background-color: #ffffff !important;
+  --main-color: #111118 !important;
+  --link-color: #5b21b6 !important;
+  --code-block-background-color: #f3f2fb !important;
+  --button-background-color: #6d28d9 !important;
+  
+  /* Sidebar - deep indigo background with high-contrast text */
+  --sidebar-background-color: #1e1b4b !important;
+  --sidebar-background-color-hover: #2e2560 !important;
+  --sidebar-text-color: #f3f2fb !important;
+  --sidebar-link-color: #e0dff8 !important;
+  --sidebar-current-link-background-color: #6d28d9 !important;
+  --sidebar-elems-color: #e0dff8 !important;
+  
+  /* Search in sidebar */
+  --search-input-focused-border-color: #6d28d9 !important;
+  --search-results-alias-color: #6b6b85 !important;
+  --search-results-grey-color: #3d3d56 !important;
+  
+  /* Code highlighting */
+  --code-highlight-kw-color: #6d28d9 !important;
+  --code-highlight-kw-2-color: #5b21b6 !important;
+  --code-highlight-lifetime-color: #6d28d9 !important;
+  --code-highlight-number-color: #059669 !important;
+  --code-highlight-string-color: #059669 !important;
+  --code-highlight-attribute-color: #5b21b6 !important;
+  --code-highlight-comment-color: #6b6b85 !important;
+}
+
+.dark:root {
+  /* Main content - dark mode */
+  --main-background-color: #0f0e1a !important;
+  --main-color: #eeedf8 !important;
+  --link-color: #a78bfa !important;
+  --code-block-background-color: #1a1830 !important;
+  
+  /* Sidebar - very dark background with high-contrast light text */
+  --sidebar-background-color: #0a0916 !important;
+  --sidebar-background-color-hover: #1a1830 !important;
+  --sidebar-text-color: #e0dff8 !important;
+  --sidebar-link-color: #e0dff8 !important;
+  --sidebar-current-link-background-color: #6d28d9 !important;
+  --sidebar-elems-color: #d4d2f0 !important;
+  
+  /* Code highlighting - brighter for dark mode */
+  --code-highlight-kw-color: #a78bfa !important;
+  --code-highlight-kw-2-color: #c4b5fd !important;
+  --code-highlight-number-color: #4ade80 !important;
+  --code-highlight-string-color: #4ade80 !important;
+}
+
+body, .rustdoc {
+  font-family: 'Space Grotesk', system-ui, sans-serif !important;
+  font-size: 18px !important;
+  line-height: 1.75 !important;
+}
+
+pre, code, .code-header {
+  font-family: 'JetBrains Mono', 'Courier New', monospace !important;
+}
+
+/* Force sidebar text colors for accessibility - WCAG AA compliant */
+.sidebar, .sidebar a, .sidebar-elems a {
+  color: var(--sidebar-link-color) !important;
+}
+
+.sidebar .location {
+  color: var(--sidebar-text-color) !important;
+}
+
+.sidebar-elems .block {
+  color: var(--sidebar-elems-color) !important;
+}
+
+/* Remove any orange/amber colors that conflict with dark backgrounds */
+.rust-logo {
+  filter: brightness(0) saturate(100%) invert(93%) sepia(8%) saturate(387%) hue-rotate(210deg) brightness(103%) contrast(96%) !important;
+}
+
+/* Custom navigation links at top of sidebar */
+.hypermail-nav {
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(224, 223, 248, 0.2);
+  margin-bottom: 8px;
+}
+
+.hypermail-nav a {
+  display: block;
+  padding: 6px 0;
+  color: var(--sidebar-link-color) !important;
+  text-decoration: none;
+  font-size: 0.9em;
+  transition: opacity 0.2s;
+}
+
+.hypermail-nav a:hover {
+  opacity: 0.8;
+  text-decoration: underline;
+}
+
+.hypermail-nav a::before {
+  content: "← ";
+}
+</style>
+<script>
+// Add navigation links to sidebar on page load
+document.addEventListener('DOMContentLoaded', function() {
+  const sidebar = document.querySelector('.sidebar');
+  if (sidebar) {
+    const nav = document.createElement('div');
+    nav.className = 'hypermail-nav';
+    nav.innerHTML = '<a href="https://hypermail-rs.github.io/">Back to Main Site</a>';
+    
+    // Insert at the top of sidebar
+    sidebar.insertBefore(nav, sidebar.firstChild);
+  }
+});
+</script>
