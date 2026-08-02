@@ -223,6 +223,8 @@ the table for discoverability and resolve via the alias table in `i18n.rs`.
 | `ji` | `yi` | Old Yiddish code |
 | `jw` | `jv` | Old Javanese code |
 | `gr` | `el` | Informal alias for Greek |
+| `zh-cn` / `zh-hans` / `zh-sg` | `zh` | Simplified Chinese variants |
+| `zh-hant` / `zh-hk` | `zh-tw` | Traditional Chinese variants |
 
 ---
 

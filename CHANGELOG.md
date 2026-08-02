@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- `delete_older`/`delete_newer`: empty config values are now treated as unset instead of emitting a spurious "Could not parse date" warning on every run.
+- `-t`/`--tables` now correctly maps to `indextable` (same as `-T`) instead of being a no-op.
+- Absolute-path guard for `folder_by_date`/`latest_folder` now correctly rejects Unix-style absolute paths on Windows.
+
+### Added
+
+- `require_msgids` and `discard_dup_msgids` config options are now honored during mbox processing.
+- `from_date`/`from_date_str` populated from the Date header for nonsequential filename hashing.
+- Multipart MIME nesting depth limit to prevent stack overflow on crafted messages.
+- Iterative BST insert/traversal/drop in the email store to avoid stack overflow on large archives.
+
+### Security
+
+- CSP `script-src` now pins the inline theme/a11y script via a `sha256` hash instead of `unsafe-inline`.
+- Archive title is HTML-escaped before being substituted into page `<title>`/headings.
+- Inline image data URIs validate the base64 payload alphabet to prevent HTML attribute breakout.
+
 ## [1.0.0] - 2026-06-16
 
 ### Project Rename and Versioning

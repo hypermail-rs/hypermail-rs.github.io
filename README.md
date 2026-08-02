@@ -112,6 +112,7 @@ hypermail -x -m mailbox.mbox -d output/ -l "Fresh Archive"
 | `-o` | `--set` | Set config option (e.g. `-o showhtml=2`) |
 | `-p` | `--progress` | Show progress output |
 | `-s` | `--suffix` | HTML file suffix (default: html) |
+| `-t` | `--tables` | Same as `-T` (classic hypermail's message-table flag, remapped to `indextable`) |
 | `-T` | `--indextables` | Use index tables |
 | `-u` | `--update` | Incremental update |
 | `-v` | `--verbose` | Show configuration variable values and exit |
@@ -179,6 +180,10 @@ Configuration can also be set via CLI with `-o key=value`. CLI options override 
 | `monthly_index` | bool | Generate per-month summary index pages |
 | `yearly_index` | bool | Generate per-year summary index pages |
 | `linkquotes` | bool | Link quoted text back to original messages |
+| `delete_older` | string | Skip/delete messages dated before this date (RFC 2822 or ISO 8601) |
+| `delete_newer` | string | Skip/delete messages dated after this date (RFC 2822 or ISO 8601) |
+| `require_msgids` | bool | Skip messages without a Message-ID (default: true) |
+| `discard_dup_msgids` | bool | Skip messages whose Message-ID is already in the archive (default: true) |
 
 ## Template variables
 
@@ -280,7 +285,7 @@ See [SECURITY.md](SECURITY.md) for the full security review.
 
 ### Removed/deprecated
 
-- `-t` (tables) — accepted for compatibility but has no effect
+- `-t` (tables) — remapped to `indextable` (same effect as `-T`/`--indextables`); classic hypermail used it for per-message HTML tables, which no longer exist.
 - `showhr` — deprecated in the original C version; accepted in config but has no effect and emits a deprecation warning. Remove from your config file.
 - `usetable` — deprecated in the original C version; accepted in config but has no effect and emits a deprecation warning. Remove from your config file.
 - `body` — deprecated in the original C version; accepted in config but has no effect and emits a deprecation warning. Remove from your config file.
