@@ -125,36 +125,6 @@ pub fn messageindex_name(config: &Config) -> PathBuf {
     PathBuf::from(config.dir.as_deref().unwrap_or(".")).join("msgindex")
 }
 
-/// Scans the output directory and returns the highest sequential message number found.
-pub fn find_max_msgnum(config: &Config) -> i32 {
-    let dir = config.dir.as_deref().unwrap_or(".");
-    let suffix = &config.htmlsuffix;
-    let mut max = -1;
-    if let Ok(entries) = fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if let Some(ext) = path.extension() {
-                if ext == suffix.as_str() {
-                    if let Some(stem) = path.file_stem() {
-                        if let Some(s) = stem.to_str() {
-                            if let Ok(n) = s.parse::<i32>() {
-                                if n > max {
-                                    max = n;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    if max < 0 {
-        -1
-    } else {
-        max
-    }
-}
-
 /// Expands date format placeholders (`%y`, `%m`, `%d`, etc.) in a path template.
 pub fn dirpath(frmptr: &str) -> String {
     let now = chrono::Local::now();
@@ -257,12 +227,27 @@ pub fn msg_subdir(email: &EmailInfo, config: &Config) -> Option<EmailSubdirInfo>
 }
 
 /// Creates a symlink pointing to the latest folder (if configured).
-pub fn symlink_latest(config: &Config) -> std::io::Result<()> {
+///
+/// Target is the subdirectory of the newest message by date (folder_by_date or
+/// msgsperfolder layout). Relative link target matches classic Hypermail.
+pub fn symlink_latest(store: &crate::structs::EmailStore, config: &Config) -> std::io::Result<()> {
     if let Some(ref latest) = config.latest_folder {
+        // Security: reject path traversal / absolute paths in the (operator-configured)
+        // latest_folder value, same guard as folder_by_date above — a misconfigured or
+        // malicious config could otherwise place a symlink outside the archive dir.
+        if latest.contains("..") || std::path::Path::new(latest).is_absolute() {
+            log::warn!(
+                "latest_folder '{}' looks unsafe (absolute or contains ..); skipping symlink",
+                latest
+            );
+            return Ok(());
+        }
         let dir = config.dir.as_deref().unwrap_or(".");
         let link_path = PathBuf::from(dir).join(latest);
+        let target = latest_folder_target(store, config);
         let _ = fs::remove_file(&link_path);
-        let target = latest_folder_path(config);
+        // Also remove if it is a directory symlink/junction
+        let _ = fs::remove_dir(&link_path);
         #[cfg(unix)]
         std::os::unix::fs::symlink(&target, &link_path)?;
         #[cfg(windows)]
@@ -271,8 +256,22 @@ pub fn symlink_latest(config: &Config) -> std::io::Result<()> {
     Ok(())
 }
 
-fn latest_folder_path(config: &Config) -> String {
-    config.dir.as_deref().unwrap_or(".").to_string()
+/// Relative path of the folder containing the newest message, or `"."` if flat layout.
+fn latest_folder_target(store: &crate::structs::EmailStore, config: &Config) -> String {
+    let mut best: Option<(i64, String)> = None;
+    for email in &store.emails {
+        if let Some(sub) = msg_subdir(email, config) {
+            let subdir = sub.subdir.trim_end_matches('/').to_string();
+            if subdir.is_empty() {
+                continue;
+            }
+            match best {
+                Some((d, _)) if email.date < d => {},
+                _ => best = Some((email.date, subdir)),
+            }
+        }
+    }
+    best.map(|(_, s)| s).unwrap_or_else(|| ".".to_string())
 }
 
 /// Creates a directory and all parent directories if they don't exist.
@@ -482,12 +481,23 @@ fn parse_old_html_comments(html: &str, msgnum: i32) -> Option<EmailInfo> {
         return None;
     }
 
+    // Restore timestamps for incremental updates / date-based folders
+    let date = date_str
+        .as_deref()
+        .and_then(parse_comment_timestamp)
+        .or_else(|| from_date_str.as_deref().and_then(parse_comment_timestamp))
+        .unwrap_or(0);
+    let from_date = from_date_str.as_deref().and_then(parse_comment_timestamp).unwrap_or(date);
+
     Some(EmailInfo {
         msgnum,
         name,
         email_addr,
         from_date_str,
+        from_date,
         date_str,
+        date,
+        datenum: date,
         subject,
         msgid,
         inreplyto,
@@ -495,6 +505,14 @@ fn parse_old_html_comments(html: &str, msgnum: i32) -> Option<EmailInfo> {
         is_deleted,
         ..Default::default()
     })
+}
+
+/// Parse a timestamp from an HTML comment value (ISO or RFC 2822).
+fn parse_comment_timestamp(s: &str) -> Option<i64> {
+    crate::date::iso_to_secs(s)
+        .ok()
+        .or_else(|| crate::date::parse_rfc2822_date(s).ok())
+        .filter(|&t| t > 0)
 }
 
 fn extract_comment<'a>(line: &'a str, key: &str) -> Option<&'a str> {
@@ -766,5 +784,65 @@ mod tests {
         let email = make_email(7, "<a@b>");
         let path = message_path(&email, &config);
         assert!(path.to_string_lossy().ends_with("0007.html"));
+    }
+
+    #[test]
+    fn test_latest_folder_target_msgsperfolder() {
+        let mut config = Config::default();
+        config.dir = Some("/tmp".to_string());
+        config.msgsperfolder = 100;
+        let mut store = crate::structs::EmailStore::new();
+        let mut e1 = make_email(50, "<a@b>");
+        e1.date = 1000;
+        let mut e2 = make_email(250, "<c@d>");
+        e2.date = 2000;
+        store.add_email(e1);
+        store.add_email(e2);
+        let target = latest_folder_target(&store, &config);
+        assert_eq!(target, "2"); // msgnum 250 / 100
+    }
+
+    #[test]
+    fn test_latest_folder_target_flat() {
+        let config = Config::default();
+        let mut store = crate::structs::EmailStore::new();
+        store.add_email(make_email(1, "<a@b>"));
+        assert_eq!(latest_folder_target(&store, &config), ".");
+    }
+
+    #[test]
+    fn test_symlink_latest_rejects_path_traversal() {
+        let tmpdir = std::env::temp_dir().join(format!("hm_test_symlink_{}", std::process::id()));
+        let _ = fs::create_dir_all(&tmpdir);
+        let mut config = Config::default();
+        config.dir = Some(tmpdir.to_string_lossy().to_string());
+        config.latest_folder = Some("../../evil".to_string());
+        let store = crate::structs::EmailStore::new();
+        // Must not error (guard returns Ok early) and must not create anything outside tmpdir.
+        assert!(symlink_latest(&store, &config).is_ok());
+        let escaped = tmpdir.parent().unwrap().parent().unwrap().join("evil");
+        assert!(!escaped.exists());
+        let _ = fs::remove_dir_all(&tmpdir);
+    }
+
+    #[test]
+    fn test_symlink_latest_rejects_absolute_path() {
+        let tmpdir =
+            std::env::temp_dir().join(format!("hm_test_symlink_abs_{}", std::process::id()));
+        let _ = fs::create_dir_all(&tmpdir);
+        let mut config = Config::default();
+        config.dir = Some(tmpdir.to_string_lossy().to_string());
+        config.latest_folder = Some("/tmp/hm_evil_absolute_link".to_string());
+        let store = crate::structs::EmailStore::new();
+        assert!(symlink_latest(&store, &config).is_ok());
+        assert!(!PathBuf::from("/tmp/hm_evil_absolute_link").exists());
+        let _ = fs::remove_dir_all(&tmpdir);
+    }
+
+    #[test]
+    fn test_parse_comment_timestamp_rfc2822() {
+        let t = parse_comment_timestamp("Mon, 15 Mar 2021 12:00:00 +0000");
+        assert!(t.is_some());
+        assert!(t.unwrap() > 0);
     }
 }

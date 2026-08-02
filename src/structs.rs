@@ -2,6 +2,13 @@ use crate::message::{Body, BodyChain, EmailInfo, Header, HmList, Reply};
 use regex::Regex;
 use std::collections::HashMap;
 
+/// Normalize a Message-ID for lookup/dedup: trim whitespace and lowercase.
+/// Angle brackets are preserved if present so display values stay unchanged;
+/// comparison keys always use this form so `" <A@B> "` matches `"<a@b>"`.
+pub fn normalize_msgid(msgid: &str) -> String {
+    msgid.trim().to_ascii_lowercase()
+}
+
 #[derive(Debug, Clone)]
 pub struct EmailStore {
     pub emails: Vec<EmailInfo>,
@@ -52,7 +59,7 @@ impl EmailStore {
     }
 
     pub fn find_by_msgid(&self, msgid: &str) -> Option<usize> {
-        self.msgid_table.get(msgid).copied()
+        self.msgid_table.get(&normalize_msgid(msgid)).copied()
     }
 
     pub fn find_by_msgnum(&self, msgnum: i32) -> Option<usize> {
@@ -64,7 +71,7 @@ impl EmailStore {
         let msgnum = email.msgnum;
 
         if let Some(ref msgid) = email.msgid {
-            self.msgid_table.insert(msgid.clone(), idx);
+            self.msgid_table.insert(normalize_msgid(msgid), idx);
         }
 
         self.msgnum_table.insert(msgnum, idx);
@@ -107,6 +114,14 @@ impl EmailStore {
         );
     }
 
+    /// Inserts `idx` into the tree ordered by `field_fn`/`msgnum_fn`.
+    ///
+    /// # Robustness
+    ///
+    /// Iterative (not recursive) descent: a large near-sorted mailbox (the common
+    /// case — messages usually arrive in date order) degenerates this simple BST
+    /// into a linked list, so a recursive insert would recurse to depth N and risk
+    /// a stack overflow (an abort, not a catchable panic) on large archives.
     fn insert_into_tree_by_field<F1, F2>(
         node: Option<Box<Header>>,
         idx: usize,
@@ -122,23 +137,31 @@ impl EmailStore {
         let key = field_fn(email);
         let msgnum = msgnum_fn(email);
 
-        match node {
-            None => Some(Box::new(Header { email_index: idx, left: None, right: None })),
-            Some(mut n) => {
-                let node_email = &emails[n.email_index];
-                let node_key = field_fn(node_email);
-                let node_msgnum = msgnum_fn(node_email);
+        let mut root = match node {
+            Some(n) => n,
+            None => return Some(Box::new(Header { email_index: idx, left: None, right: None })),
+        };
 
-                if key < node_key || (key == node_key && msgnum < node_msgnum) {
-                    n.left =
-                        Self::insert_into_tree_by_field(n.left, idx, emails, field_fn, msgnum_fn);
-                } else {
-                    n.right =
-                        Self::insert_into_tree_by_field(n.right, idx, emails, field_fn, msgnum_fn);
-                }
-                Some(n)
-            },
+        let mut cur: &mut Box<Header> = &mut root;
+        loop {
+            let node_email = &emails[cur.email_index];
+            let node_key = field_fn(node_email);
+            let node_msgnum = msgnum_fn(node_email);
+            let go_left = key < node_key || (key == node_key && msgnum < node_msgnum);
+            let slot = if go_left {
+                &mut cur.left
+            } else {
+                &mut cur.right
+            };
+            match slot {
+                Some(_) => cur = slot.as_mut().unwrap(),
+                None => {
+                    *slot = Some(Box::new(Header { email_index: idx, left: None, right: None }));
+                    break;
+                },
+            }
         }
+        Some(root)
     }
 
     pub fn traverse_date_list(&self) -> Vec<usize> {
@@ -159,11 +182,20 @@ impl EmailStore {
         result
     }
 
+    /// Iterative in-order traversal (explicit stack) — see `insert_into_tree_by_field`
+    /// for why recursion here would risk a stack overflow on large archives.
     fn inorder_traversal(node: &Option<Box<Header>>, result: &mut Vec<usize>) {
-        if let Some(n) = node {
-            Self::inorder_traversal(&n.left, result);
-            result.push(n.email_index);
-            Self::inorder_traversal(&n.right, result);
+        let mut stack: Vec<&Header> = Vec::new();
+        let mut cur = node.as_deref();
+        while cur.is_some() || !stack.is_empty() {
+            while let Some(n) = cur {
+                stack.push(n);
+                cur = n.left.as_deref();
+            }
+            if let Some(n) = stack.pop() {
+                result.push(n.email_index);
+                cur = n.right.as_deref();
+            }
         }
     }
 }
@@ -244,6 +276,15 @@ mod tests {
         assert_eq!(idx, 0);
         assert_eq!(store.find_by_msgid("<test@example.com>"), Some(0));
         assert_eq!(store.find_by_msgnum(1), Some(0));
+    }
+
+    #[test]
+    fn test_msgid_normalize_finds_whitespace_and_case_variants() {
+        let mut store = EmailStore::new();
+        store.add_email(make_email(1, "<Test@Example.COM>", "S", "A", 1));
+        assert_eq!(store.find_by_msgid("  <test@example.com>  "), Some(0));
+        assert_eq!(store.find_by_msgid("<TEST@EXAMPLE.COM>"), Some(0));
+        assert_eq!(normalize_msgid(" <X@Y> "), "<x@y>");
     }
 
     #[test]
@@ -479,5 +520,28 @@ mod tests {
         let mut replylist = Vec::new();
         link_reply(&mut replylist, 3, 4, Some(0), true);
         assert_eq!(replylist[0].maybe_reply, 1);
+    }
+
+    /// Regression test for a stack-overflow risk: a large near-sorted mailbox
+    /// (the common case) degenerates the ad-hoc BST into a linked list of depth N.
+    /// Insert/traversal/drop used to be recursive (stack overflow = process abort
+    /// at large N); all three are now iterative. Builds a deep left-leaning chain
+    /// directly (O(N), sidestepping the store's own O(N^2) degenerate-tree insert
+    /// cost — a separate, already-documented performance concern) at a depth that
+    /// would reliably blow the default thread stack if drop/traversal were still
+    /// recursive.
+    #[test]
+    fn test_deep_tree_traverse_and_drop_no_stack_overflow() {
+        const DEPTH: usize = 300_000;
+        let mut root: Option<Box<Header>> = None;
+        for i in (0..DEPTH).rev() {
+            root = Some(Box::new(Header { email_index: i, left: root, right: None }));
+        }
+        let mut result = Vec::new();
+        EmailStore::inorder_traversal(&root, &mut result);
+        assert_eq!(result.len(), DEPTH);
+        assert_eq!(result[0], DEPTH - 1);
+        assert_eq!(*result.last().unwrap(), 0);
+        drop(root); // must not stack-overflow dropping the deep left-only chain
     }
 }

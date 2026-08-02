@@ -179,6 +179,10 @@ struct Cli {
 }
 
 fn main() {
+    // Enable logging via RUST_LOG (e.g. RUST_LOG=info). Ignore if already set.
+    let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn"))
+        .try_init();
+
     let cli = Cli::parse();
 
     let mut config = Config::default();
@@ -243,7 +247,9 @@ fn main() {
     if let Some(ref val) = cli.suffix {
         config.set_string("htmlsuffix", val).unwrap();
     }
-    if cli.indextables {
+    // -t/--tables was message HTML tables in classic Hypermail (deprecated there).
+    // Map to indextable for drop-in CLI acceptance; same as -T when only -t is passed.
+    if cli.tables || cli.indextables {
         config.set_switch("indextable", true).unwrap();
     }
     if cli.update {
@@ -743,6 +749,29 @@ fn process_mbox(config: &Config, store: &mut EmailStore) -> Result<()> {
                     warn(config, &format!("message #{}: missing From address", num));
                 }
             }
+            // Hypermail: require_msgids — skip messages without Message-ID
+            if config.require_msgids && email.msgid.is_none() {
+                warn(
+                    config,
+                    &format!("message #{}: skipped (require_msgids, no Message-ID)", msgnum),
+                );
+                msgnum += config.increment.max(1);
+                continue;
+            }
+            // Hypermail: discard_dup_msgids — skip if Message-ID already in archive
+            if config.discard_dup_msgids {
+                if let Some(ref mid) = email.msgid {
+                    let mid = mid.trim();
+                    if !mid.is_empty() && store.find_by_msgid(mid).is_some() {
+                        warn(
+                            config,
+                            &format!("message #{}: skipped (duplicate Message-ID)", msgnum),
+                        );
+                        msgnum += config.increment.max(1);
+                        continue;
+                    }
+                }
+            }
             let idx = store.add_email(email);
             store.insert_into_date_list(idx);
             store.insert_into_subject_list(idx);
@@ -1003,12 +1032,17 @@ fn parse_email(
         0
     };
 
+    // from_date: Hypermail uses the Date header (and Received fallback) as the
+    // message arrival/sent timestamp used for nonsequential filename hashing.
+    let from_date = date;
+    let from_date_str = date_str.clone();
+
     EmailInfo {
         msgnum,
         name,
         email_addr,
-        from_date_str: None,
-        from_date: 0,
+        from_date_str,
+        from_date,
         date_str,
         date,
         msgid,
@@ -1366,7 +1400,7 @@ fn write_indices(store: &EmailStore, config: &Config) -> Result<()> {
         && (config.folder_by_date.is_some() || config.msgsperfolder > 0)
     {
         log::info!("Creating latest_folder symlink...");
-        if let Err(e) = symlink_latest(config) {
+        if let Err(e) = symlink_latest(store, config) {
             log::warn!("Failed to create latest_folder symlink: {}", e);
         }
     }
@@ -1497,6 +1531,31 @@ mod tests {
         assert_eq!(email.subject.as_deref(), Some("Test"));
         assert_eq!(email.bodylist.bodies.len(), 1);
         assert_eq!(email.bodylist.bodies[0].line, "Hello World");
+        // from_date mirrors Date for nonsequential hashing (Hypermail parity)
+        assert!(email.date > 0);
+        assert_eq!(email.from_date, email.date);
+        assert!(email.from_date_str.is_some());
+    }
+
+    #[test]
+    fn test_require_msgids_and_discard_dup_defaults() {
+        let config = Config::default();
+        assert!(config.require_msgids);
+        assert!(config.discard_dup_msgids);
+    }
+
+    #[test]
+    fn test_discard_dup_msgids_store_lookup() {
+        let mut store = EmailStore::new();
+        let config = Config::default();
+        let headers = "From: A <a@e.com>\nSubject: One\nMessage-ID: <dup@e.com>\nDate: Mon, 15 Mar 2021 12:00:00 +0000\n\n";
+        let email = parse_email(1, headers, headers.as_bytes(), "x", b"x", &config);
+        store.add_email(email);
+        assert!(store.find_by_msgid("<dup@e.com>").is_some());
+        // Second parse with same msgid would be skipped by process_mbox when discard_dup_msgids
+        let email2 = parse_email(2, headers, headers.as_bytes(), "y", b"y", &config);
+        assert_eq!(email2.msgid.as_deref(), Some("<dup@e.com>"));
+        assert!(store.find_by_msgid(email2.msgid.as_deref().unwrap().trim()).is_some());
     }
 
     #[test]

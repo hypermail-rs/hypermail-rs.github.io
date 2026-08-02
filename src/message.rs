@@ -209,6 +209,34 @@ pub struct Header {
     pub right: Option<Box<Header>>,
 }
 
+/// Iterative drop to avoid a stack overflow when dropping a deep tree.
+///
+/// A large near-sorted mailbox degenerates the ad-hoc BST in `structs.rs` into a
+/// linked list of depth N; Rust's default derived drop glue for `Box<Header>`
+/// recurses through `left`/`right`, so dropping such a tree (e.g. when the
+/// `EmailStore` goes out of scope) would recurse to depth N and could overflow
+/// the stack. This unlinks children into an explicit work stack instead.
+impl Drop for Header {
+    fn drop(&mut self) {
+        let mut stack: Vec<Box<Header>> = Vec::new();
+        if let Some(l) = self.left.take() {
+            stack.push(l);
+        }
+        if let Some(r) = self.right.take() {
+            stack.push(r);
+        }
+        while let Some(mut node) = stack.pop() {
+            if let Some(l) = node.left.take() {
+                stack.push(l);
+            }
+            if let Some(r) = node.right.take() {
+                stack.push(r);
+            }
+            // `node` drops here with left/right already None, so no recursion.
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Attachment {
     pub content_type: String,

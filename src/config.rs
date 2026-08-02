@@ -186,6 +186,8 @@ pub struct Config {
     pub delete_incremental: bool,
     pub showgenerator: bool,
     pub show_warnings: bool,
+    /// When true (default), link Google Fonts CDN. Set false for offline/privacy.
+    pub external_fonts: bool,
 
     // --- Integer configs ---
     pub increment: i32,
@@ -205,6 +207,8 @@ pub struct Config {
     pub delete_level: i32,
     pub progress: i32,
     pub max_message_size: usize,
+    /// Hard cap on messages kept in one run (DoS guard). 0 = unlimited.
+    pub max_messages: usize,
 
     // --- List configs ---
     pub show_headers: HmList,
@@ -324,6 +328,7 @@ impl Default for Config {
             delete_incremental: true,
             showgenerator: true,
             show_warnings: false,
+            external_fonts: true,
             increment: 0,
             showhtml: 1,
             show_msg_links: 1,
@@ -341,6 +346,7 @@ impl Default for Config {
             delete_level: DELETE_LEAVES_TEXT,
             progress: PROGRESS,
             max_message_size: 100 * 1024 * 1024,
+            max_messages: 1_000_000,
             show_headers: HmList::new(),
             avoid_indices: HmList::new(),
             avoid_top_indices: HmList::new(),
@@ -488,8 +494,20 @@ impl Config {
             "latest_folder" => self.latest_folder = Some(val.to_string()),
             "base_url" => self.base_url = Some(val.to_string()),
             "describe_folder" => self.describe_folder = Some(val.to_string()),
-            "delete_older" => self.delete_older = Some(val.to_string()),
-            "delete_newer" => self.delete_newer = Some(val.to_string()),
+            "delete_older" => {
+                self.delete_older = if val.is_empty() {
+                    None
+                } else {
+                    Some(val.to_string())
+                }
+            },
+            "delete_newer" => {
+                self.delete_newer = if val.is_empty() {
+                    None
+                } else {
+                    Some(val.to_string())
+                }
+            },
             "alts_text" => self.alts_text = Some(val.to_string()),
             "append_filename" => self.append_filename = Some(val.to_string()),
             "txtsuffix" => self.txtsuffix = Some(val.to_string()),
@@ -549,6 +567,7 @@ impl Config {
             "delete_incremental" => self.delete_incremental = val,
             "showgenerator" => self.showgenerator = val,
             "show_warnings" => self.show_warnings = val,
+            "external_fonts" => self.external_fonts = val,
             _ => {
                 return Err(HypermailError::InvalidConfigValue {
                     key: key.to_string(),
@@ -579,6 +598,7 @@ impl Config {
             "delete_level" => self.delete_level = val as i32,
             "progress" => self.progress = val as i32,
             "max_message_size" => self.max_message_size = val as usize,
+            "max_messages" => self.max_messages = val as usize,
             _ => {
                 return Err(HypermailError::InvalidConfigValue {
                     key: key.to_string(),
@@ -1036,6 +1056,7 @@ mod tests {
             ("delete_incremental", true),
             ("showgenerator", true),
             ("show_warnings", false),
+            ("external_fonts", true),
         ] {
             assert!(cfg.set_switch(key, *initial).is_ok(), "switch {} should exist", key);
         }
@@ -1062,6 +1083,7 @@ mod tests {
             "delete_level",
             "progress",
             "max_message_size",
+            "max_messages",
         ] {
             assert!(cfg.set_integer(key, 1).is_ok(), "integer {} should exist", key);
         }

@@ -281,7 +281,7 @@ fn format_date(email: &EmailInfo, config: &Config) -> String {
         &config.language,
     );
     let iso_str = secs_to_iso(timestamp);
-    format!("<time datetime=\"{}\">{}</time>", iso_str, date_str)
+    format!("<time datetime=\"{}\">{}</time>", escape_html(&iso_str), escape_html(&date_str))
 }
 
 /// Decode and strip the list tag from a subject, for use in both message and index pages.
@@ -329,13 +329,42 @@ fn format_reply_links(email: &EmailInfo, store: &EmailStore, config: &Config) ->
         let author = decode_mime_words(rep.name.as_deref().unwrap_or(i18n.get("unknown author")));
         html.push_str(&format!(
             "  <li><a href=\"{}\">{} by {}</a></li>\n",
-            filename,
+            escape_html(&filename),
             format_subject_text(subject, config),
             escape_html(&author)
         ));
     }
     html.push_str("</ul>\n");
     Some(html)
+}
+
+/// True if `line` is markup produced by our converters (trusted class names only).
+/// Rejects arbitrary `<div onclick=…>` / `<hr onload=…>` that would otherwise
+/// pass through because they start with `<div` / `<hr`.
+fn is_trusted_body_markup(line: &str) -> bool {
+    let s = line.trim_start();
+    if s.starts_with("<hr class=\"hm-sig\">") || s.starts_with("<hr class=\"hm-sig\"") {
+        return true;
+    }
+    if !s.starts_with("<div class=\"") {
+        return false;
+    }
+    // Known classes emitted by txt2html / conv_showhtml
+    const TRUSTED: &[&str] = &[
+        "<div class=\"hm-blank\"",
+        "<div class=\"hm-pg\"",
+        "<div class=\"hm-sig-text\"",
+        "<div class=\"hm-quote-1\"",
+        "<div class=\"hm-quote-2\"",
+        "<div class=\"hm-quote-3\"",
+        "<div class=\"hm-quote-4\"",
+        "<div class=\"hm-quote-5\"",
+        "<div class=\"hm-quote-6\"",
+        "<div class=\"hm-quote-7\"",
+        "<div class=\"hm-quote-8\"",
+        "<div class=\"hm-quote-9\"",
+    ];
+    TRUSTED.iter().any(|p| s.starts_with(p))
 }
 
 fn format_body(body_chain: &crate::message::BodyChain, config: &Config) -> String {
@@ -403,10 +432,9 @@ fn format_body(body_chain: &crate::message::BodyChain, config: &Config) -> Strin
                 html.push_str("</details>\n");
                 in_attachment = false;
             }
-            // SAFETY: body.line was already HTML-escaped by txt2html_line() which wraps
-            // all user content in <div> or <hr> tags. This check confirms that processing
-            // occurred. Lines not matching these patterns are escaped as defense-in-depth.
-            if body.line.starts_with("<div") || body.line.starts_with("<hr") {
+            // Only pass through converter-emitted markup (hm-* classes). showhtml>=2
+            // may leave raw HTML; that still goes through the allowlist or is escaped.
+            if is_trusted_body_markup(&body.line) {
                 // Blank-line marker: produce a paragraph gap *within* the
                 // current run. Combined with the trailing `\n` already on the
                 // previous line, this gives `pre-wrap` a real empty line.
@@ -430,7 +458,7 @@ fn format_body(body_chain: &crate::message::BodyChain, config: &Config) -> Strin
                         },
                     }
                 } else {
-                    // Non-coalescable line (e.g. <hr class="hm-sig">).
+                    // Non-coalescable trusted line (e.g. <hr class="hm-sig">).
                     flush_run(&mut html, &mut run_open, &mut run_inner);
                     html.push_str(&body.line);
                 }
@@ -669,5 +697,48 @@ mod tests {
         // Should use <article id="..."> not <a name="...">
         assert!(result.contains("<article id=\""), "should use <article id=>");
         assert!(!result.contains("<a name=\""), "should NOT use deprecated <a name=>");
+    }
+
+    #[test]
+    fn test_subject_xss_escaped_in_title() {
+        let mut email = make_test_email();
+        email.subject = Some("</title><script>alert(1)</script>".to_string());
+        let store = crate::structs::EmailStore::new();
+        let config = Config::default();
+        let result = print_article(&email, &store, &config).unwrap();
+        assert!(!result.contains("<script>alert(1)</script>"), "raw script in subject");
+        assert!(result.contains("&lt;script&gt;") || result.contains("&lt;/title&gt;"));
+    }
+
+    #[test]
+    fn test_inline_image_xss_in_body_not_emitted() {
+        let mut email = make_test_email();
+        email.bodylist = BodyChain {
+            bodies: vec![Body {
+                line: r#"[INLINE_IMAGE:image/png:x" onerror="alert(1)]"#.to_string(),
+                html: false,
+                header: false,
+                parsed_header: false,
+                attached: false,
+                demimed: false,
+                msgnum: 42,
+            }],
+        };
+        let store = crate::structs::EmailStore::new();
+        let config = Config::default();
+        // process like main does
+        let mut store_email = email.clone();
+        crate::txt2html::conv_showhtml(&mut store_email.bodylist, &config);
+        let result = print_article(&store_email, &store, &config).unwrap();
+        assert!(
+            !result.contains("<img"),
+            "malicious INLINE_IMAGE must not become img: {}",
+            result
+        );
+        assert!(
+            !result.contains(r#"onerror=""#),
+            "must not create onerror attribute: {}",
+            result
+        );
     }
 }

@@ -3,14 +3,43 @@ use crate::message::BodyChain;
 use crate::quotes::{find_quote_class, is_sig_start, unquote};
 use crate::string_utils::conv_urls;
 
-pub fn txt2html(body_chain: &mut BodyChain, config: &Config) {
-    let mut in_sig = false;
-    for body in &mut body_chain.bodies {
-        if body.attached || body.header || body.html {
-            continue;
-        }
-        body.line = txt2html_line(&body.line, config, &mut in_sig);
+/// Safe image MIME types for inline data-URI embedding.
+/// `image/svg+xml` is excluded — SVG can contain scripts.
+const SAFE_IMAGE_TYPES: &[&str] = &[
+    "image/gif",
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/webp",
+    "image/bmp",
+    "image/tiff",
+];
+
+/// Returns true if `s` is valid base64 alphabet only (A–Z, a–z, 0–9, +, /, =).
+/// Rejects quotes and other characters that could break out of HTML attributes.
+fn is_safe_base64(s: &str) -> bool {
+    !s.is_empty()
+        && s.bytes().all(|b| {
+            matches!(b,
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'+' | b'/' | b'='
+            )
+        })
+}
+
+/// Build an inline image div if the line is a valid `[INLINE_IMAGE:…]` marker.
+fn try_inline_image_html(line: &str, pg_class: &str) -> Option<String> {
+    if !line.starts_with("[INLINE_IMAGE:") || !line.ends_with(']') {
+        return None;
     }
+    let marker_content = line.strip_prefix("[INLINE_IMAGE:")?.strip_suffix(']')?;
+    let (mime_type, base64_data) = marker_content.split_once(':')?;
+    if !SAFE_IMAGE_TYPES.contains(&mime_type) || !is_safe_base64(base64_data) {
+        return None;
+    }
+    Some(format!(
+        "<div class=\"{}\"><img src=\"data:{};base64,{}\" alt=\"Embedded image\" style=\"max-width:100%;height:auto\"></div>\n",
+        pg_class, mime_type, base64_data
+    ))
 }
 
 fn txt2html_line(line: &str, config: &Config, in_sig: &mut bool) -> String {
@@ -32,32 +61,8 @@ fn txt2html_line(line: &str, config: &Config, in_sig: &mut bool) -> String {
     let pg_class = if *in_sig { "hm-sig-text" } else { "hm-pg" };
 
     // Check for inline image marker: [INLINE_IMAGE:mime/type:base64data]
-    if line.starts_with("[INLINE_IMAGE:") && line.ends_with(']') {
-        if let Some(marker_content) =
-            line.strip_prefix("[INLINE_IMAGE:").and_then(|s| s.strip_suffix(']'))
-        {
-            if let Some((mime_type, base64_data)) = marker_content.split_once(':') {
-                // SEC-1: Validate MIME type against allowlist before emitting data URI.
-                // image/svg+xml is excluded — SVG can contain scripts.
-                const SAFE_IMAGE_TYPES: &[&str] = &[
-                    "image/gif",
-                    "image/jpeg",
-                    "image/jpg",
-                    "image/png",
-                    "image/webp",
-                    "image/bmp",
-                    "image/tiff",
-                ];
-                if SAFE_IMAGE_TYPES.contains(&mime_type) {
-                    // Convert marker to actual HTML img tag
-                    return format!(
-                        "<div class=\"{}\"><img src=\"data:{};base64,{}\" alt=\"Embedded image\" style=\"max-width:100%;height:auto\"></div>\n",
-                        pg_class, mime_type, base64_data
-                    );
-                }
-            }
-        }
-        // If parsing fails or MIME type not in allowlist, fall through to normal processing
+    if let Some(html) = try_inline_image_html(line, pg_class) {
+        return html;
     }
 
     let is_quote = line.starts_with('>');
@@ -123,7 +128,11 @@ pub fn conv_showhtml(body: &mut BodyChain, config: &Config) {
             }
             if showhtml == 0 {
                 let escaped = escape_html(&b.line);
-                b.line = escaped;
+                b.line = if escaped.is_empty() {
+                    String::from("<div class=\"hm-blank\"></div>\n")
+                } else {
+                    format!("<div class=\"{}\">{}</div>\n", pg_class, escaped)
+                };
                 continue;
             }
             // showhtml == 1: escape HTML body text
@@ -139,45 +148,35 @@ pub fn conv_showhtml(body: &mut BodyChain, config: &Config) {
             continue;
         }
         // !b.html (plain text body)
+        // Wrap in <div> so format_body() does not double-escape (it trusts <div>/<hr> lines).
         if showhtml == 0 {
-            let escaped = escape_html(&b.line);
-            b.line = escaped;
-            continue;
-        }
-        if showhtml == 1 {
-            // Check for inline image marker first
-            let line = b.line.trim_end_matches('\n').trim_end_matches('\r');
-            if line.starts_with("[INLINE_IMAGE:") && line.ends_with(']') {
-                if let Some(marker_content) =
-                    line.strip_prefix("[INLINE_IMAGE:").and_then(|s| s.strip_suffix(']'))
-                {
-                    if let Some((mime_type, base64_data)) = marker_content.split_once(':') {
-                        const SAFE_IMAGE_TYPES: &[&str] = &[
-                            "image/gif",
-                            "image/jpeg",
-                            "image/jpg",
-                            "image/png",
-                            "image/webp",
-                            "image/bmp",
-                            "image/tiff",
-                        ];
-                        if SAFE_IMAGE_TYPES.contains(&mime_type) {
-                            b.line = format!(
-                                "<div class=\"{}\"><img src=\"data:{};base64,{}\" alt=\"Embedded image\" style=\"max-width:100%;height:auto\"></div>\n",
-                                pg_class, mime_type, base64_data
-                            );
-                            continue;
-                        }
-                    }
-                }
-            }
-
-            // Normal text processing
             let escaped = escape_html(&b.line);
             b.line = if escaped.is_empty() {
                 String::from("<div class=\"hm-blank\"></div>\n")
             } else {
                 format!("<div class=\"{}\">{}</div>\n", pg_class, escaped)
+            };
+            continue;
+        }
+        if showhtml == 1 {
+            // Check for inline image marker first (MIME type + base64 alphabet validated)
+            let line = b.line.trim_end_matches('\n').trim_end_matches('\r');
+            if let Some(html) = try_inline_image_html(line, pg_class) {
+                b.line = html;
+                continue;
+            }
+
+            // Normal text processing; linkify when href_detection is enabled (Hypermail default path)
+            let escaped = escape_html(&b.line);
+            let content = if config.href_detection {
+                conv_urls(&escaped)
+            } else {
+                escaped
+            };
+            b.line = if content.is_empty() {
+                String::from("<div class=\"hm-blank\"></div>\n")
+            } else {
+                format!("<div class=\"{}\">{}</div>\n", pg_class, content)
             };
             continue;
         }
@@ -296,7 +295,11 @@ mod tests {
         config.showhtml = 0;
         let mut chain = make_body_chain("<script>alert('xss')</script>");
         conv_showhtml(&mut chain, &config);
-        assert_eq!(chain.bodies[0].line, "&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;");
+        // Wrapped in div so format_body does not double-escape
+        assert_eq!(
+            chain.bodies[0].line,
+            "<div class=\"hm-pg\">&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;</div>\n"
+        );
     }
 
     #[test]
@@ -305,7 +308,31 @@ mod tests {
         config.showhtml = 0;
         let mut chain = make_body_chain("Hello World");
         conv_showhtml(&mut chain, &config);
-        assert_eq!(chain.bodies[0].line, "Hello World");
+        assert_eq!(chain.bodies[0].line, "<div class=\"hm-pg\">Hello World</div>\n");
+    }
+
+    #[test]
+    fn test_inline_image_rejects_attribute_breakout() {
+        let config = make_config();
+        let mut in_sig = false;
+        let line = r#"[INLINE_IMAGE:image/png:x" onerror="alert(1)]"#;
+        let result = txt2html_line(line, &config, &mut in_sig);
+        // Must not emit an <img> data-URI; fall through to escaped text is OK.
+        assert!(!result.contains("<img"), "invalid marker must not become img tag: {}", result);
+        assert!(
+            !result.contains(r#"onerror=""#) && !result.contains("onerror='"),
+            "must not create an onerror attribute: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_inline_image_rejects_empty_base64() {
+        let config = make_config();
+        let mut in_sig = false;
+        let line = "[INLINE_IMAGE:image/png:]";
+        let result = txt2html_line(line, &config, &mut in_sig);
+        assert!(!result.contains("<img"));
     }
 
     #[test]

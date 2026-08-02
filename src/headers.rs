@@ -1,8 +1,8 @@
-use once_cell::sync::Lazy;
 use regex::Regex;
+use std::sync::LazyLock;
 
-static MIME_WORD_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"=\?([^?]+)\?([BbQq])\?([^?]*)\?=").unwrap());
+static MIME_WORD_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"=\?([^?]+)\?([BbQq])\?([^?]*)\?=").unwrap());
 
 #[derive(Debug, Clone)]
 pub struct Header {

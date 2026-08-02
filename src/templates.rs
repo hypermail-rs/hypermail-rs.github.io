@@ -1,6 +1,4 @@
 use std::collections::HashMap;
-use std::fs;
-use std::path::Path;
 
 use crate::i18n::I18n;
 
@@ -373,13 +371,16 @@ pub fn unset_cookie(cookies: &mut CookieMap, key: &str) {
 
 /// Note: CSP includes 'unsafe-inline' in style-src because embedded images in txt2html.rs
 /// use inline style attributes (style="max-width:100%;height:auto") for responsive sizing.
+/// script-src uses a sha256 hash of the fixed inline theme/a11y script instead of
+/// 'unsafe-inline', so injected `<script>` content anywhere else in the page (e.g. an
+/// unescaped subject) still gets blocked by the browser.
 pub fn default_header_template() -> &'static str {
     "<!DOCTYPE html>
 <html lang=\"%LANG%\" %HTMLATTRS%>
 <head>
 <meta charset=\"utf-8\">
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
-<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data:; font-src 'self' https://fonts.gstatic.com; frame-src 'none'; object-src 'none'; connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com\">
+<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'self'; script-src 'self' 'sha256-JbUne2+8oxOCK8KTcztLDaHNd2v0sTpOx3FcKB/5By4='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data:; font-src 'self' https://fonts.gstatic.com; frame-src 'none'; object-src 'none'; connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com\">
 <link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">
 <link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>
 <link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?family=Noto+Sans:ital,wght@0,300..900;1,300..900&display=swap\">
@@ -502,33 +503,15 @@ pub fn default_article_template() -> &'static str {
 "
 }
 
-/// Loads the article template from `.hm_article` in `dir`, or returns the default.
-pub fn load_article_template(dir: &str) -> String {
-    let path = Path::new(dir).join(".hm_article");
-    fs::read_to_string(&path).unwrap_or_else(|_| default_article_template().to_string())
-}
-
-/// Loads the header template from `.hm_header` in `dir`, or returns the default.
-pub fn load_header_template(dir: &str) -> String {
-    let path = Path::new(dir).join(".hm_header");
-    fs::read_to_string(&path).unwrap_or_else(|_| default_header_template().to_string())
-}
-
-/// Loads the footer template from `.hm_footer` in `dir`, or returns the default.
-pub fn load_footer_template(dir: &str) -> String {
-    let path = Path::new(dir).join(".hm_footer");
-    fs::read_to_string(&path).unwrap_or_else(|_| default_footer_template().to_string())
-}
-
-/// Loads a template file by path, returning `None` if it cannot be read.
-pub fn load_template(path: &str) -> Option<String> {
-    std::fs::read_to_string(path).ok()
-}
-
 /// Builds the initial cookie map with standard header values (title, stylesheet, metadata, etc.).
+///
+/// # Security
+///
+/// `title` is treated as untrusted (e.g. message subject) and is HTML-escaped before
+/// insertion into `%TITLE%` (used in `<title>` and headings).
 pub fn get_header_cookies(config: &crate::config::Config, title: &str) -> CookieMap {
     let mut cookies = CookieMap::new();
-    set_cookie(&mut cookies, "TITLE", title);
+    set_cookie(&mut cookies, "TITLE", &crate::txt2html::escape_html(title));
 
     let stylesheet = if let Some(ref css) = config.css {
         let css_path = if !css.starts_with("http") && !css.starts_with('/') {
@@ -645,10 +628,53 @@ mod tests {
     }
 
     #[test]
+    fn test_csp_script_src_has_no_unsafe_inline() {
+        let header = default_header_template();
+        let csp_start = header.find("script-src ").unwrap();
+        let csp_segment = &header[csp_start..csp_start + 80];
+        assert!(
+            !csp_segment.contains("'unsafe-inline'"),
+            "script-src must use a hash, not 'unsafe-inline': {}",
+            csp_segment
+        );
+        assert!(csp_segment.contains("'sha256-"), "script-src must pin the inline script hash");
+    }
+
+    /// Canary: if the inline theme/a11y script in default_header_template() changes,
+    /// this length check will fail as a reminder to regenerate the CSP sha256 hash
+    /// (`shasum -a 256` over the exact bytes between `<script>\n` and `\n</script>`)
+    /// and update the `'sha256-...'` value above.
+    #[test]
+    fn test_inline_script_unchanged_canary() {
+        let header = default_header_template();
+        let start = header.find("<script>\n").unwrap() + "<script>\n".len();
+        let end = header.find("\n</script>").unwrap();
+        let script = &header[start..end];
+        assert_eq!(
+            script.len(),
+            3262,
+            "inline script content changed; regenerate the CSP sha256 hash in default_header_template()"
+        );
+    }
+
+    #[test]
     fn test_header_cookies() {
         let config = crate::config::Config::default();
         let cookies = get_header_cookies(&config, "Test Archive");
         assert_eq!(cookies.get("TITLE").unwrap(), "Test Archive");
+    }
+
+    #[test]
+    fn test_title_cookie_escapes_xss() {
+        let config = crate::config::Config::default();
+        let cookies = get_header_cookies(&config, "</title><script>alert(1)</script>");
+        let title = cookies.get("TITLE").unwrap();
+        assert!(!title.contains("<script>"), "raw script must not appear in TITLE");
+        assert!(title.contains("&lt;/title&gt;"));
+        assert!(title.contains("&lt;script&gt;"));
+        let html = substitute_cookies("<title>%TITLE%</title>", &cookies);
+        assert!(!html.contains("<script>alert"));
+        assert!(html.contains("&lt;script&gt;"));
     }
 
     #[test]

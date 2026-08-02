@@ -417,6 +417,9 @@ fn resolve_charset(body_raw: &[u8], mi: &MimeInfo) -> Option<String> {
     })
 }
 
+/// Maximum nested multipart depth to prevent stack overflow from crafted messages.
+const MAX_MULTIPART_DEPTH: u32 = 16;
+
 /// Processes a MIME message body, returning decoded text and detected charset.
 ///
 /// Handles multipart messages, inline images, attachments, and charset detection.
@@ -424,16 +427,32 @@ fn resolve_charset(body_raw: &[u8], mi: &MimeInfo) -> Option<String> {
 /// # Security
 ///
 /// Only safe image MIME types are embedded inline; SVG is excluded due to script risks.
+/// Nested multiparts are limited to [`MAX_MULTIPART_DEPTH`] levels.
 pub fn process_mime_body(
     headers: &[(String, String)],
     body_raw: &[u8],
+) -> (String, Option<String>) {
+    process_mime_body_depth(headers, body_raw, 0)
+}
+
+fn process_mime_body_depth(
+    headers: &[(String, String)],
+    body_raw: &[u8],
+    depth: u32,
 ) -> (String, Option<String>) {
     let mi = parse_mime_info(headers);
     if let Some(ref mi) = mi {
         // Check if this is a multipart message
         if mi.content_type.is_multipart() {
+            if depth >= MAX_MULTIPART_DEPTH {
+                log::warn!(
+                    "multipart nesting depth limit ({}) exceeded; treating as plain text",
+                    MAX_MULTIPART_DEPTH
+                );
+                return (String::from_utf8_lossy(body_raw).to_string(), None);
+            }
             if let Some(boundary) = mi.content_type.boundary() {
-                return process_multipart_body(body_raw, boundary, mi);
+                return process_multipart_body(body_raw, boundary, mi, depth);
             }
         }
 
@@ -472,6 +491,7 @@ fn process_multipart_body(
     body: &[u8],
     boundary: &str,
     parent_mime: &MimeInfo,
+    depth: u32,
 ) -> (String, Option<String>) {
     let is_alternative = parent_mime.content_type.subtype == "alternative";
     let boundary_tag = format!("--{}", boundary);
@@ -619,9 +639,13 @@ fn process_multipart_body(
                         }
                         result.push_str(&format!("[Attachment: {}]\n", filename));
                     }
-                } else if content_type_main.starts_with("text/") || content_type_main.is_empty() {
-                    // Process text content
-                    let (decoded, charset) = process_mime_body(&part_headers, part_body);
+                } else if content_type_main.starts_with("text/")
+                    || content_type_main.starts_with("multipart/")
+                    || content_type_main.is_empty()
+                {
+                    // Process text / nested multipart content (depth-limited)
+                    let (decoded, charset) =
+                        process_mime_body_depth(&part_headers, part_body, depth + 1);
                     if is_alternative {
                         // LOG-2: For multipart/alternative, collect parts separately.
                         if content_type_main == "text/plain" || content_type_main.is_empty() {

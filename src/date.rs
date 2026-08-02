@@ -1,6 +1,7 @@
 use crate::error::{HypermailError, Result};
 use crate::i18n::I18n;
 use chrono::{DateTime, FixedOffset, NaiveDateTime, Offset, TimeZone, Utc};
+use std::sync::LazyLock;
 
 pub const MONTHS: &[&str] = &[
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
@@ -100,7 +101,7 @@ fn try_parse_flexible(s: &str) -> Result<i64> {
 /// into an RFC 2822-compatible numeric offset (`+HHMM` / `-HHMM`).
 fn normalize_nonstandard_tz(s: &str) -> String {
     // Match pattern: ...whitespace(GMT|UTC)(+|-)H or HH or H:MM or HH:MM at end
-    let re = once_cell::sync::Lazy::force(&NONSTANDARD_TZ_RE);
+    let re = LazyLock::force(&NONSTANDARD_TZ_RE);
     if let Some(cap) = re.captures(s) {
         let sign = &cap[1];
         let hours_str = &cap[2];
@@ -117,7 +118,7 @@ fn normalize_nonstandard_tz(s: &str) -> String {
     s.to_string()
 }
 
-static NONSTANDARD_TZ_RE: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
+static NONSTANDARD_TZ_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
     regex::Regex::new(r"(?i)(?:GMT|UTC)([+-])(\d{1,2})(?::(\d{2}))?$").unwrap()
 });
 

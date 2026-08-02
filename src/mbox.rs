@@ -70,11 +70,6 @@ impl<R: Read> MboxReader<R> {
         line.starts_with(b"From ") && line.len() > 5
     }
 
-    #[allow(dead_code)]
-    fn is_from_line_mboxrd(line: &[u8]) -> bool {
-        line.starts_with(b">From ") || Self::is_from_line(line)
-    }
-
     fn unescape_mboxrd(line: &[u8]) -> Vec<u8> {
         // MboxRd: strip exactly one leading '>' from lines that start with
         // one or more '>' followed by "From ". This correctly handles
@@ -224,17 +219,6 @@ fn parse_raw_message(data: &[u8]) -> RawMessage {
     } else {
         RawMessage { from_line, headers: rest.to_vec(), body: Vec::new() }
     }
-}
-
-/// Reads an entire mbox file into a vector of raw messages.
-pub fn read_mbox_file(path: &str, format: MboxFormat) -> Result<Vec<RawMessage>> {
-    let file = std::fs::File::open(path).map_err(HypermailError::Io)?;
-    let reader = MboxReader::new(file, format);
-    let mut messages = Vec::new();
-    for msg in reader {
-        messages.push(msg?);
-    }
-    Ok(messages)
 }
 
 #[cfg(test)]

@@ -9,10 +9,13 @@ updates:
     labels:
       - "dependencies"
     open-pull-requests-limit: 10
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-minor", "version-update:semver-patch"]
     groups:
       rust-deps:
         patterns: ["*"]
-        update-types: ["minor", "patch"]
+        update-types: ["major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"

@@ -37,22 +37,25 @@ hypermail-rs implements several security measures:
 - **Message Size Limits**: Maximum 100MB per message, 10MB per line
 - **URL Length Limits**: Maximum 4096 characters
 - **Subject Length Limits**: Maximum 2048 characters for threading
-- **Path Validation**: Rejects paths containing `..` to prevent traversal attacks
+- **Path Validation**: Rejects paths containing `..` or absolute paths in `folder_by_date` and `latest_folder`, to prevent traversal/symlink-escape via config
 
 ### HTML Output Security
-- **XSS Prevention**: All user-controlled content is HTML-escaped
-- **MIME Type Allowlist**: Only safe content types allowed for inline display
-- **Content Security Policy**: Generated pages include CSP headers
-- **Attribute Escaping**: All HTML attributes properly escaped
+- **XSS Prevention**: User-controlled content (subjects, bodies, titles) is HTML-escaped before output
+- **Inline image markers**: MIME type allowlist plus base64 alphabet validation (blocks attribute breakout)
+- **MIME Type Allowlist**: Only safe content types allowed for inline display (SVG excluded)
+- **Content Security Policy**: Generated pages include CSP headers; `script-src` is pinned to a sha256 hash of the fixed inline theme/accessibility script (no `unsafe-inline` for scripts), so injected `<script>` content anywhere else on the page is still blocked by the browser
+- **Attribute Escaping**: HTML attributes properly escaped
 
 ### Memory Safety
 - **Safe Rust**: Written in 100% safe Rust (except for one documented `unsafe` block with safety comments)
 - **No Buffer Overflows**: Rust's memory safety guarantees eliminate buffer overflow vulnerabilities
 - **Dependency Auditing**: Regular `cargo audit` checks for vulnerable dependencies
+- **Stack-safe tree operations**: The subject/author/date index is a simple BST that degenerates to a linked list on near-sorted (the common case) input; insert, traversal, and drop are all iterative (explicit stack / work list) rather than recursive, so large archives cannot trigger a stack-overflow abort
 
 ### Regular Expression Safety
-- **ReDoS Protection**: Input length limits prevent regex denial-of-service
-- **Static Compilation**: Regex patterns compiled once at startup using `LazyLock`
+- **ReDoS Protection**: Input and pattern length limits on filter regexes; URL/subject length caps
+- **Static Compilation**: Built-in regex patterns compiled once at startup using `std::sync::LazyLock`
+- **Multipart depth limit**: Nested multiparts capped to prevent stack exhaustion
 
 ## Security Auditing
 

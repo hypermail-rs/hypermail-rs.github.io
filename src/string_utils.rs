@@ -1,5 +1,5 @@
-use once_cell::sync::Lazy;
 use regex::Regex;
+use std::sync::LazyLock;
 
 /// Maximum length for URL detection to prevent ReDoS attacks.
 ///
@@ -14,47 +14,25 @@ const MAX_URL_LENGTH: usize = 4096;
 /// longer subjects. We limit to 2048 for performance in O(n²) threading loop.
 const MAX_SUBJECT_THREAD_LENGTH: usize = 2048;
 
-static URL_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r#"(?i)((https?|ftp)://[^\s<>"']+|www\.[^\s<>"']+)"#).unwrap());
+static URL_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?i)((https?|ftp)://[^\s<>"']+|www\.[^\s<>"']+)"#).unwrap());
 
-static EMAIL_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})").unwrap());
+static EMAIL_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})").unwrap());
 
-static UNRE_RE: Lazy<Regex> = Lazy::new(|| {
+static UNRE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)^(\s*(re|fwd?|aw|ang|sv|vs|odp|antw)\s*[\[:\]>#]*\s*)+")
         .expect("UNRE_RE compile")
 });
 
-static ONEUNRE_RE: Lazy<Regex> = Lazy::new(|| {
+static ONEUNRE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)^\s*(re|fwd?|aw|ang|sv|vs|odp|antw)\s*[\[:\]>#]*\s*")
         .expect("ONEUNRE_RE compile")
 });
 
-static STRIPZONE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\s+\([^)]*\)\s*$").unwrap());
+static STRIPZONE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+\([^)]*\)\s*$").unwrap());
 
-static NUM_REF_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"&#(\d+);").unwrap());
-
-/// Copies at most `max` bytes from `src` into `dest`, respecting UTF-8 char boundaries.
-pub fn strcpymax(dest: &mut String, src: &str, max: usize) {
-    dest.clear();
-    let char_boundary = src.floor_char_boundary(max.min(src.len()));
-    dest.push_str(&src[..char_boundary]);
-}
-
-/// Converts a string to lowercase in place.
-pub fn strtolower(s: &mut String) {
-    *s = s.to_lowercase();
-}
-
-/// Replaces all occurrences of `from` with `to` in place.
-pub fn strreplace_in(s: &mut String, from: &str, to: &str) {
-    *s = s.replace(from, to);
-}
-
-/// Replaces all occurrences of character `from` with string `to` in place.
-pub fn replacechar(s: &mut String, from: char, to: &str) {
-    *s = s.replace(from, to);
-}
+static NUM_REF_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"&#(\d+);").unwrap());
 
 /// Strips reply prefixes from email subjects.
 ///
@@ -266,15 +244,6 @@ pub fn getvalue(s: &str) -> Option<&str> {
     }
 }
 
-/// Returns `val` if non-empty and not "NONE", otherwise returns `default_val`.
-pub fn getconfvalue(_key: &str, val: &str, default_val: &str) -> String {
-    if val.is_empty() || val.eq_ignore_ascii_case("NONE") {
-        default_val.to_string()
-    } else {
-        val.to_string()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -346,42 +315,6 @@ mod tests {
     }
 
     #[test]
-    fn test_strcpymax_shorter_than_max() {
-        let mut dest = String::new();
-        strcpymax(&mut dest, "hello", 10);
-        assert_eq!(dest, "hello");
-    }
-
-    #[test]
-    fn test_strcpymax_truncates_at_char_boundary() {
-        let mut dest = String::new();
-        let s = "héllo"; // h=1 byte, é=2 bytes; floor_char_boundary(3) = 3 → "hé"
-        strcpymax(&mut dest, s, 3);
-        assert_eq!(dest, "hé");
-    }
-
-    #[test]
-    fn test_strtolower() {
-        let mut s = "HELLO World".to_string();
-        strtolower(&mut s);
-        assert_eq!(s, "hello world");
-    }
-
-    #[test]
-    fn test_strreplace_in() {
-        let mut s = "foo bar foo".to_string();
-        strreplace_in(&mut s, "foo", "baz");
-        assert_eq!(s, "baz bar baz");
-    }
-
-    #[test]
-    fn test_replacechar() {
-        let mut s = "a.b.c".to_string();
-        replacechar(&mut s, '.', "_dot_");
-        assert_eq!(s, "a_dot_b_dot_c");
-    }
-
-    #[test]
     fn test_oneunre_strips_single_prefix() {
         assert_eq!(oneunre("Re: Hello"), "Hello");
         assert_eq!(oneunre("Re: Re: Hello"), "Re: Hello");
@@ -410,21 +343,6 @@ mod tests {
         let obfuscated = obfuscate_email_address(original);
         let restored = unobfuscate_email_address(&obfuscated);
         assert_eq!(restored, original);
-    }
-
-    #[test]
-    fn test_getconfvalue_returns_val() {
-        assert_eq!(getconfvalue("key", "value", "default"), "value");
-    }
-
-    #[test]
-    fn test_getconfvalue_returns_default_on_empty() {
-        assert_eq!(getconfvalue("key", "", "default"), "default");
-    }
-
-    #[test]
-    fn test_getconfvalue_returns_default_on_none() {
-        assert_eq!(getconfvalue("key", "NONE", "default"), "default");
     }
 
     #[test]

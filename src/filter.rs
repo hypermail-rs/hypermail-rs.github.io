@@ -1,21 +1,58 @@
 use crate::config::Config;
 use crate::date::{iso_to_secs, parse_rfc2822_date};
 use crate::message::FilteredReason;
-use regex::Regex;
+use regex::{Regex, RegexBuilder};
+
+/// Maximum length of a filter regex pattern (admin config). Prevents pathological patterns.
+const MAX_REGEX_PATTERN_LEN: usize = 512;
+
+/// Maximum length of a single string matched against filter regexes.
+const MAX_REGEX_INPUT_LEN: usize = 64 * 1024;
+
+/// Compile-time DFA/NFA size budget for filter regexes (ReDoS mitigation).
+const REGEX_SIZE_LIMIT: usize = 1 << 20; // 1 MiB compiled size
+const REGEX_DFA_SIZE_LIMIT: usize = 1 << 20;
+
+/// Compile a filter pattern with length and compiled-size guards.
+fn compile_filter_regex(pattern: &str) -> Option<Regex> {
+    if pattern.len() > MAX_REGEX_PATTERN_LEN {
+        log::warn!("Filter regex pattern exceeds {} bytes; ignoring", MAX_REGEX_PATTERN_LEN);
+        return None;
+    }
+    match RegexBuilder::new(pattern)
+        .size_limit(REGEX_SIZE_LIMIT)
+        .dfa_size_limit(REGEX_DFA_SIZE_LIMIT)
+        .build()
+    {
+        Ok(r) => Some(r),
+        Err(e) => {
+            log::warn!("Invalid or too-complex filter regex '{}': {}", pattern, e);
+            None
+        },
+    }
+}
+
+fn truncate_for_regex(s: &str) -> &str {
+    if s.len() <= MAX_REGEX_INPUT_LEN {
+        s
+    } else {
+        &s[..s.floor_char_boundary(MAX_REGEX_INPUT_LEN)]
+    }
+}
 
 pub fn check_header_filter(headers: &[(String, String)], filter_list: &[String]) -> Vec<usize> {
     let mut matches = Vec::new();
     for (i, pattern) in filter_list.iter().enumerate() {
-        let re = match Regex::new(pattern) {
-            Ok(r) => r,
-            Err(e) => {
-                log::warn!("Invalid header filter regex '{}': {}", pattern, e);
-                continue;
-            },
+        let re = match compile_filter_regex(pattern) {
+            Some(r) => r,
+            None => continue,
         };
         for (name, value) in headers {
             let header_line = format!("{}: {}", name, value);
-            if re.is_match(&header_line) || re.is_match(name) || re.is_match(value) {
+            let name_t = truncate_for_regex(name);
+            let value_t = truncate_for_regex(value);
+            let line_t = truncate_for_regex(&header_line);
+            if re.is_match(line_t) || re.is_match(name_t) || re.is_match(value_t) {
                 matches.push(i);
                 break;
             }
@@ -31,15 +68,12 @@ pub fn check_header_filter(headers: &[(String, String)], filter_list: &[String])
 pub fn check_body_filter(body_lines: &[String], filter_list: &[String]) -> Vec<usize> {
     let mut matches = Vec::new();
     for (i, pattern) in filter_list.iter().enumerate() {
-        let re = match Regex::new(pattern) {
-            Ok(r) => r,
-            Err(e) => {
-                log::warn!("Invalid body filter regex '{}': {}", pattern, e);
-                continue;
-            },
+        let re = match compile_filter_regex(pattern) {
+            Some(r) => r,
+            None => continue,
         };
         for line in body_lines {
-            if re.is_match(line) {
+            if re.is_match(truncate_for_regex(line)) {
                 matches.push(i);
                 break;
             }
@@ -156,18 +190,21 @@ pub fn apply_filters(
         is_deleted |= FilteredReason::Delete as i32;
     }
 
+    // Compile each require pattern once per apply_filters call (not per header/line).
     let require_results: Vec<bool> = config
         .filter_require
         .values
         .iter()
         .map(|pattern| {
-            let re = match Regex::new(pattern) {
-                Ok(r) => r,
-                Err(_) => return false,
+            let re = match compile_filter_regex(pattern) {
+                Some(r) => r,
+                None => return false,
             };
             headers.iter().any(|(name, value)| {
                 let header_line = format!("{}: {}", name, value);
-                re.is_match(&header_line) || re.is_match(name) || re.is_match(value)
+                re.is_match(truncate_for_regex(&header_line))
+                    || re.is_match(truncate_for_regex(name))
+                    || re.is_match(truncate_for_regex(value))
             })
         })
         .collect();
@@ -177,11 +214,11 @@ pub fn apply_filters(
         .values
         .iter()
         .map(|pattern| {
-            let re = match Regex::new(pattern) {
-                Ok(r) => r,
-                Err(_) => return false,
+            let re = match compile_filter_regex(pattern) {
+                Some(r) => r,
+                None => return false,
             };
-            body_lines.iter().any(|line| re.is_match(line))
+            body_lines.iter().any(|line| re.is_match(truncate_for_regex(line)))
         })
         .collect();
 
@@ -328,5 +365,13 @@ mod tests {
         let headers = vec![("x-spam-flag".to_string(), "no".to_string())];
         let filters = vec!["x-spam-flag".to_string()];
         assert!(!check_header_filter(&headers, &filters).is_empty());
+    }
+
+    #[test]
+    fn test_oversized_regex_pattern_ignored() {
+        let headers = vec![("subject".to_string(), "test".to_string())];
+        let huge = "a".repeat(MAX_REGEX_PATTERN_LEN + 1);
+        let filters = vec![huge];
+        assert!(check_header_filter(&headers, &filters).is_empty());
     }
 }
