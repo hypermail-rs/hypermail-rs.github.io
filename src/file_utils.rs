@@ -194,7 +194,7 @@ pub fn msg_subdir(email: &EmailInfo, config: &Config) -> Option<EmailSubdirInfo>
                 ts.with_timezone(&Local).format(fbd).to_string()
             };
             // Security: reject path traversal attempts via format string
-            if sub.contains("..") || std::path::Path::new(&sub).is_absolute() {
+            if sub.contains("..") || is_rooted_path(&sub) {
                 log::warn!("folder_by_date produced suspicious path '{}', using flat layout", sub);
                 return None;
             }
@@ -226,6 +226,20 @@ pub fn msg_subdir(email: &EmailInfo, config: &Config) -> Option<EmailSubdirInfo>
     None
 }
 
+/// Returns true if `s` looks like an absolute/rooted path on *any* platform.
+///
+/// `Path::is_absolute()` only recognizes Windows drive/UNC prefixes on Windows,
+/// so a Unix-style `/etc/passwd` config value is (wrongly) "relative" there and
+/// slips past a naive absolute-path guard. Config values are always written with
+/// forward slashes regardless of host OS, so reject leading `/` or `\` and
+/// Windows drive prefixes (`C:`) uniformly.
+fn is_rooted_path(s: &str) -> bool {
+    s.starts_with('/')
+        || s.starts_with('\\')
+        || s.get(1..2) == Some(":")
+        || std::path::Path::new(s).is_absolute()
+}
+
 /// Creates a symlink pointing to the latest folder (if configured).
 ///
 /// Target is the subdirectory of the newest message by date (folder_by_date or
@@ -235,7 +249,7 @@ pub fn symlink_latest(store: &crate::structs::EmailStore, config: &Config) -> st
         // Security: reject path traversal / absolute paths in the (operator-configured)
         // latest_folder value, same guard as folder_by_date above — a misconfigured or
         // malicious config could otherwise place a symlink outside the archive dir.
-        if latest.contains("..") || std::path::Path::new(latest).is_absolute() {
+        if latest.contains("..") || is_rooted_path(latest) {
             log::warn!(
                 "latest_folder '{}' looks unsafe (absolute or contains ..); skipping symlink",
                 latest
