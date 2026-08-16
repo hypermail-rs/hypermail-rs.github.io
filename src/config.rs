@@ -720,7 +720,13 @@ impl Config {
 
     /// Loads configuration from environment variables prefixed with `HM_`.
     pub fn load_env(&mut self) {
-        for (key, val) in std::env::vars() {
+        self.load_env_from(std::env::vars());
+    }
+
+    /// Loads configuration from an iterator of `(key, value)` pairs prefixed with `HM_`.
+    /// Used directly in tests to avoid `set_var`/`remove_var` races.
+    fn load_env_from(&mut self, vars: impl Iterator<Item = (String, String)>) {
+        for (key, val) in vars {
             if let Some(stripped) = key.strip_prefix("HM_") {
                 let config_key = stripped.to_lowercase();
                 let _ = self.apply_cli_arg(&config_key, &val);
@@ -1003,9 +1009,8 @@ mod tests {
     #[test]
     fn test_env_loading() {
         let mut cfg = Config::default();
-        std::env::set_var("HM_LANGUAGE", "de");
-        cfg.load_env();
-        std::env::remove_var("HM_LANGUAGE");
+        let vars = vec![("HM_LANGUAGE".to_string(), "de".to_string())];
+        cfg.load_env_from(vars.into_iter());
         assert_eq!(cfg.language, "de");
     }
 

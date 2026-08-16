@@ -463,14 +463,14 @@ pub fn validate_config_file(content: &str) -> Vec<ConfigDiagnostic> {
         }
     }
 
-    // dir must not end with a path separator followed by .. (basic traversal check)
+    // dir must not contain path traversal components
     if let Some(dir_val) = key_val("dir") {
         if dir_val.contains("..") {
             diags.push(ConfigDiagnostic {
                 line: key_line("dir"),
-                severity: "warning",
+                severity: "error",
                 source: format!("dir = {}", dir_val),
-                message: "dir value contains '..' — verify this is intentional".to_string(),
+                message: "dir value contains '..' — path traversal not allowed".to_string(),
             });
         }
     }
@@ -2154,12 +2154,12 @@ overwrite = On
     }
 
     #[test]
-    fn test_validate_dir_with_dotdot_is_warning() {
+    fn test_validate_dir_with_dotdot_is_error() {
         let content = "dir = /tmp/../archive\n";
         let diags = validate_config_file(content);
         assert!(
-            diags.iter().any(|d| d.severity == "warning" && d.message.contains("..")),
-            "dir with '..' should be a warning; got: {:#?}",
+            diags.iter().any(|d| d.severity == "error" && d.message.contains("..")),
+            "dir with '..' should be an error; got: {:#?}",
             diags
         );
     }

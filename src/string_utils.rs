@@ -125,11 +125,11 @@ pub fn conv_urls(line: &str) -> String {
             } else {
                 url.to_string()
             };
-            // SEC: Escape href attribute to prevent attribute injection via crafted URLs
+            // SEC: Escape both href attribute and anchor text
             format!(
                 "<a href=\"{}\" rel=\"noopener noreferrer\">{}</a>",
                 escape_html_attr(&href),
-                url
+                escape_html_attr(url)
             )
         })
         .to_string()
