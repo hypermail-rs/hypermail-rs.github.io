@@ -772,17 +772,24 @@ pub fn print_folder_index_set(
             format!("{}/", folder)
         };
 
+        // Tell message_url_str() these pages already live inside `folder/`,
+        // so message links are filename-only instead of repeating the folder.
+        let mut folder_config = config.clone();
+        if !folder.is_empty() {
+            folder_config.current_output_subdir = Some(folder.clone());
+        }
+
         // date  → index.html  (the "default" for the folder)
-        let date_html = print_date_index(&sub_store, config)?;
+        let date_html = print_date_index(&sub_store, &folder_config)?;
         results.push((format!("{}index.{}", prefix, suffix), date_html));
 
-        let subj_html = print_subject_index(&sub_store, config)?;
+        let subj_html = print_subject_index(&sub_store, &folder_config)?;
         results.push((format!("{}subject.{}", prefix, suffix), subj_html));
 
-        let auth_html = print_author_index(&sub_store, config)?;
+        let auth_html = print_author_index(&sub_store, &folder_config)?;
         results.push((format!("{}author.{}", prefix, suffix), auth_html));
 
-        let thread_html = print_thread_index(&sub_store, config)?;
+        let thread_html = print_thread_index(&sub_store, &folder_config)?;
         results.push((format!("{}thread.{}", prefix, suffix), thread_html));
     }
 
@@ -1249,6 +1256,36 @@ mod tests {
             "paths should include folder-prefixed index.html; got: {:?}",
             paths
         );
+    }
+
+    /// Regression test for: pages inside a subfolder (e.g. `2024-02/index.html`)
+    /// must link to messages as `0001.html`, NOT `2024-02/0001.html` — the latter
+    /// resolves (relative to the page's own folder) to the nonexistent
+    /// `2024-02/2024-02/0001.html` and 404s.
+    #[test]
+    fn test_folder_index_message_links_do_not_repeat_folder_name() {
+        let (store, config) = make_foldered_store();
+        let pages = print_folder_index_set(&store, &config).unwrap();
+        for (path, html) in &pages {
+            if let Some(folder) = path.strip_suffix("index.html").or_else(|| {
+                path.strip_suffix("subject.html")
+            }).or_else(|| path.strip_suffix("author.html"))
+              .or_else(|| path.strip_suffix("thread.html"))
+            {
+                let folder = folder.trim_end_matches('/');
+                if folder.is_empty() {
+                    continue;
+                }
+                let doubled = format!("href=\"{}/{}", folder, folder);
+                assert!(
+                    !html.contains(&doubled),
+                    "page {} must not link to doubled folder path ({}): {}",
+                    path,
+                    doubled,
+                    html
+                );
+            }
+        }
     }
 
     #[test]

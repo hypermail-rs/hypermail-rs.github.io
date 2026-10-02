@@ -3,7 +3,9 @@ use std::path::PathBuf;
 use crate::config::{Config, DELETE_LEAVES_STUBS, DELETE_LEAVES_TEXT};
 use crate::date::{get_date_str, secs_to_iso};
 use crate::error::Result;
-use crate::file_utils::{message_name, message_path as utils_message_path, message_url_str};
+use crate::file_utils::{
+    message_name, message_path as utils_message_path, message_url_str, msg_subdir,
+};
 use crate::headers::decode_mime_words;
 use crate::i18n::I18n;
 use crate::message::EmailInfo;
@@ -17,6 +19,12 @@ use crate::txt2html::escape_html;
 
 /// Renders a complete HTML page for a single email message.
 pub fn print_article(email: &EmailInfo, store: &EmailStore, config: &Config) -> Result<String> {
+    // This page is written inside the message's own folder (if any), so
+    // message_url_str() must omit that folder prefix for any link rendered
+    // here (e.g. reply links) — otherwise a reply in the same folder would
+    // link to `folder/0003.html` which 404s as `folder/folder/0003.html`.
+    let config = &with_own_subdir(email, config);
+
     // If delete_level < DELETE_LEAVES_TEXT, show "Deleted message" stub
     // If delete_level >= DELETE_LEAVES_TEXT, show the actual message content
     if email.is_deleted != 0 && config.delete_level < DELETE_LEAVES_TEXT {
@@ -26,6 +34,20 @@ pub fn print_article(email: &EmailInfo, store: &EmailStore, config: &Config) -> 
     let article_html = generate_article_email(email, store, config)?;
 
     render_message_page(email, config, &article_html)
+}
+
+/// Returns a config clone with `current_output_subdir` set to `email`'s own
+/// folder, so `message_url_str()` omits the prefix for links rendered on
+/// `email`'s own article page.
+fn with_own_subdir(email: &EmailInfo, config: &Config) -> Config {
+    let mut config = config.clone();
+    if let Some(sub) = msg_subdir(email, &config) {
+        let subdir = sub.subdir.trim_end_matches('/');
+        if !subdir.is_empty() {
+            config.current_output_subdir = Some(subdir.to_string());
+        }
+    }
+    config
 }
 
 fn load_template_or_default(path: Option<&str>, default: &str) -> String {
@@ -606,6 +628,36 @@ mod tests {
         let config = Config::default();
         let result = print_article(&email, &crate::structs::EmailStore::new(), &config).unwrap();
         assert!(result.contains("Deleted") || result.contains("deleted"));
+    }
+
+    /// Regression test: a message page rendered inside a `folder_by_date`
+    /// subdirectory must link to a reply in the SAME folder as `0043.html`,
+    /// not `2021/0043.html` — the latter 404s as `2021/2021/0043.html` once
+    /// resolved relative to the page it's rendered on (`2021/0042.html`).
+    #[test]
+    fn test_reply_link_omits_own_folder_prefix() {
+        let parent = make_test_email(); // msgnum 42, date 1615824000 (2021-03-15)
+        let mut reply = make_test_email();
+        reply.msgnum = 43;
+        reply.msgid = Some("<reply@example.com>".to_string());
+        reply.subject = Some("Re: Test Message".to_string());
+
+        let mut store = crate::structs::EmailStore::new();
+        store.add_email(parent.clone());
+        store.add_email(reply);
+        crate::structs::link_reply(&mut store.replylist, 42, 43, None, false);
+
+        let mut config = Config::default();
+        config.folder_by_date = Some("%Y".to_string());
+        config.gmtime = true;
+
+        let html = print_article(&parent, &store, &config).unwrap();
+        assert!(html.contains("href=\"0043.html\""), "reply link should be filename-only: {}", html);
+        assert!(
+            !html.contains("href=\"2021/0043.html\""),
+            "reply link must not repeat the folder prefix: {}",
+            html
+        );
     }
 
     #[test]

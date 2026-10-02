@@ -104,6 +104,12 @@ pub fn message_path(email: &EmailInfo, config: &Config) -> PathBuf {
 }
 
 /// Returns the relative URL string for a message, including subdirectory if applicable.
+///
+/// When `config.current_output_subdir` names the same folder the message belongs
+/// to, the page being rendered already lives inside that folder, so the subdir
+/// prefix is omitted (otherwise e.g. a page at `2025/index.html` would link to
+/// `2025/0001.html`, which the browser resolves to the non-existent
+/// `2025/2025/0001.html`).
 pub fn message_url_str(email: &EmailInfo, config: &Config) -> String {
     let sub = msg_subdir(email, config);
     let filename = message_filename(email, config);
@@ -111,10 +117,12 @@ pub fn message_url_str(email: &EmailInfo, config: &Config) -> String {
         Some(ref s) => {
             let subdir = s.subdir.trim_end_matches('/');
             if subdir.is_empty() {
-                filename
-            } else {
-                format!("{}/{}", subdir, filename)
+                return filename;
             }
+            if config.current_output_subdir.as_deref() == Some(subdir) {
+                return filename;
+            }
+            format!("{}/{}", subdir, filename)
         },
         None => filename,
     }
@@ -669,6 +677,31 @@ mod tests {
     fn test_message_url_str_with_subdir() {
         let mut config = Config::default();
         config.msgsperfolder = 100;
+        let email = make_email(142, "<a@b>");
+        let url = message_url_str(&email, &config);
+        assert_eq!(url, "1/0142.html");
+    }
+
+    /// Regression test: when rendering a page that already lives inside the
+    /// message's folder (e.g. `2025/index.html`), message_url_str() must return
+    /// just the filename, not `folder/filename` (which would 404 as
+    /// `folder/folder/filename` once resolved relative to the page).
+    #[test]
+    fn test_message_url_str_omits_subdir_when_rendering_within_it() {
+        let mut config = Config::default();
+        config.msgsperfolder = 100;
+        config.current_output_subdir = Some("1".to_string());
+        let email = make_email(142, "<a@b>");
+        let url = message_url_str(&email, &config);
+        assert_eq!(url, "0142.html");
+    }
+
+    /// A different folder's output context must NOT suppress the prefix.
+    #[test]
+    fn test_message_url_str_keeps_subdir_for_other_folder_context() {
+        let mut config = Config::default();
+        config.msgsperfolder = 100;
+        config.current_output_subdir = Some("0".to_string());
         let email = make_email(142, "<a@b>");
         let url = message_url_str(&email, &config);
         assert_eq!(url, "1/0142.html");

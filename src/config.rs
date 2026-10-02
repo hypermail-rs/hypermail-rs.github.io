@@ -141,6 +141,11 @@ pub struct Config {
     pub theme: Option<String>,
     pub append_filename: Option<String>,
     pub txtsuffix: Option<String>,
+    /// Internal (not user-configurable): set while rendering per-folder index
+    /// pages so `message_url_str()` knows the generated page already lives
+    /// inside this subdirectory, and can emit a filename-only link instead of
+    /// repeating the folder in the path (which would 404: `2025/2025/0001.html`).
+    pub current_output_subdir: Option<String>,
 
     // --- Switch (bool) configs ---
     pub email_address_obfuscation: bool,
@@ -280,6 +285,7 @@ impl Default for Config {
             alts_text: None,
             append_filename: None,
             txtsuffix: None,
+            current_output_subdir: None,
             description: None,
             theme: None,
             bodyheader: None,
