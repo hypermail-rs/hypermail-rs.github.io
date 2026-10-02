@@ -652,7 +652,11 @@ mod tests {
         config.gmtime = true;
 
         let html = print_article(&parent, &store, &config).unwrap();
-        assert!(html.contains("href=\"0043.html\""), "reply link should be filename-only: {}", html);
+        assert!(
+            html.contains("href=\"0043.html\""),
+            "reply link should be filename-only: {}",
+            html
+        );
         assert!(
             !html.contains("href=\"2021/0043.html\""),
             "reply link must not repeat the folder prefix: {}",

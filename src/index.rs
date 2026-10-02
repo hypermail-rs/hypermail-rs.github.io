@@ -1267,10 +1267,11 @@ mod tests {
         let (store, config) = make_foldered_store();
         let pages = print_folder_index_set(&store, &config).unwrap();
         for (path, html) in &pages {
-            if let Some(folder) = path.strip_suffix("index.html").or_else(|| {
-                path.strip_suffix("subject.html")
-            }).or_else(|| path.strip_suffix("author.html"))
-              .or_else(|| path.strip_suffix("thread.html"))
+            if let Some(folder) = path
+                .strip_suffix("index.html")
+                .or_else(|| path.strip_suffix("subject.html"))
+                .or_else(|| path.strip_suffix("author.html"))
+                .or_else(|| path.strip_suffix("thread.html"))
             {
                 let folder = folder.trim_end_matches('/');
                 if folder.is_empty() {
