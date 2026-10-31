@@ -208,6 +208,7 @@ pub fn add_body(mut bodylist: BodyChain, line: &str, msgnum: i32) -> BodyChain {
         parsed_header: false,
         attached: false,
         demimed: false,
+        converted: false,
         msgnum,
     });
     bodylist

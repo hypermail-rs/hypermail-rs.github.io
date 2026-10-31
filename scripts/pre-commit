@@ -1,9 +1,16 @@
 #!/bin/sh
 #
-# Pre-commit hook that runs cargo fmt and cargo clippy
+# Pre-commit hook that runs cargo fmt, cargo clippy and cargo audit
 # Install with: make install-hooks
 
 set -e
+
+# Colored labels only when writing to a terminal
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+    OK="\033[32mOK:\033[0m"; FAIL="\033[31mFAIL:\033[0m"; INFO="\033[33mNOTE:\033[0m"
+else
+    OK="OK:"; FAIL="FAIL:"; INFO="NOTE:"
+fi
 
 echo "Running pre-commit checks..."
 
@@ -16,19 +23,29 @@ fi
 # Run cargo fmt check (don't modify files, just check)
 echo "Checking code formatting..."
 if ! cargo fmt --all -- --check >/dev/null 2>&1; then
-    echo "❌ Code formatting issues found. Running cargo fmt..."
+    printf "%b\n" "${FAIL} Code formatting issues found. Running cargo fmt..."
     cargo fmt --all
-    echo "✅ Code formatted. Please review changes and commit again."
+    printf "%b\n" "${INFO} Code formatted. Please review changes and commit again."
     exit 1
 fi
 
 # Run cargo clippy
 echo "Running clippy lints..."
-if ! cargo clippy --all-targets --all-features -- -D warnings 2>&1 | grep -q "Finished"; then
-    echo "❌ Clippy found issues. Please fix them before committing."
-    cargo clippy --all-targets --all-features -- -D warnings
+if ! cargo clippy --all-targets --all-features -- -D warnings; then
+    printf "%b\n" "${FAIL} Clippy found issues. Please fix them before committing."
     exit 1
 fi
 
-echo "✅ Pre-commit checks passed"
+# Run cargo audit
+echo "Running security audit..."
+if ! command -v cargo-audit >/dev/null 2>&1; then
+    printf "%b\n" "${FAIL} cargo-audit not installed. Run: cargo install cargo-audit"
+    exit 1
+fi
+if ! cargo audit; then
+    printf "%b\n" "${FAIL} cargo audit found vulnerabilities. Please fix them before committing."
+    exit 1
+fi
+
+printf "%b\n" "${OK} Pre-commit checks passed"
 exit 0

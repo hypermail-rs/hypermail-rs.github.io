@@ -176,16 +176,7 @@ pub fn msg_subdir(email: &EmailInfo, config: &Config) -> Option<EmailSubdirInfo>
         let sub = format!("{}/", subdir_no);
         let base = config.dir.as_deref().unwrap_or(".");
         let full = PathBuf::from(base).join(&sub).to_string_lossy().to_string();
-        let rel = if subdir_no == 0 {
-            "./".to_string()
-        } else {
-            let mut r = String::new();
-            let depth = sub.matches('/').count();
-            for _ in 0..depth {
-                r.push_str("../");
-            }
-            r
-        };
+        let rel = "../".repeat(sub.matches('/').count());
         return Some(EmailSubdirInfo {
             subdir: sub,
             full_path: full,
@@ -195,6 +186,12 @@ pub fn msg_subdir(email: &EmailInfo, config: &Config) -> Option<EmailSubdirInfo>
     }
     if let Some(ref fbd) = config.folder_by_date {
         if email.date > 0 {
+            if chrono::format::StrftimeItems::new(fbd)
+                .any(|item| matches!(item, chrono::format::Item::Error))
+            {
+                log::warn!("invalid folder_by_date format '{}', using flat layout", fbd);
+                return None;
+            }
             let ts = Utc.timestamp_opt(email.date, 0).single().unwrap_or_default();
             let sub = if config.gmtime {
                 ts.format(fbd).to_string()
@@ -818,9 +815,26 @@ mod tests {
     }
 
     #[test]
+    fn test_msg_subdir_first_folder_links_up() {
+        let mut config = Config::default();
+        config.msgsperfolder = 100;
+        let info = msg_subdir(&make_email(5, "<a@b>"), &config).unwrap();
+        assert_eq!(info.subdir, "0/");
+        assert_eq!(info.rel_path_to_top, "../");
+    }
+
+    #[test]
     fn test_msg_subdir_none_by_default() {
         let config = Config::default();
         let email = make_email(42, "<a@b>");
+        assert!(msg_subdir(&email, &config).is_none());
+    }
+
+    #[test]
+    fn test_msg_subdir_invalid_date_format_uses_flat_layout() {
+        let config = Config { folder_by_date: Some("%Q".to_string()), ..Default::default() };
+        let mut email = make_email(1, "<a@b>");
+        email.date = 1615809600;
         assert!(msg_subdir(&email, &config).is_none());
     }
 

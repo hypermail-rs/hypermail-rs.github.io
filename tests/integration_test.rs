@@ -14,6 +14,28 @@ fn mbox_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/test_data/simple.mbox")
 }
 
+#[test]
+fn test_search_index_generated_without_attachments() {
+    for enabled in ["no", "yes"] {
+        let dir = tempfile::tempdir().unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_hypermail"))
+            .args([
+                "-m",
+                mbox_path().to_str().unwrap(),
+                "-d",
+                dir.path().to_str().unwrap(),
+                "-x",
+                "-o",
+                &format!("attachmentsindex={enabled}"),
+            ])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let search = fs::read_to_string(dir.path().join("search_index.txt")).unwrap();
+        assert!(!search.is_empty());
+    }
+}
+
 /// Creates a temp directory and returns its path. Caller must clean up.
 fn temp_dir(name: &str) -> PathBuf {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!("tests/tmp_{}", name));

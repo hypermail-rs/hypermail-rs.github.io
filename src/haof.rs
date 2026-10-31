@@ -29,7 +29,7 @@ pub fn write_haof(store: &EmailStore, config: &Config) -> Result<String> {
         ));
         xml.push_str(&format!(
             "    <from>{}</from>\n",
-            escape_xml(email.name.as_deref().unwrap_or("Unknown"))
+            escape_xml(&decode_mime_words(email.name.as_deref().unwrap_or("Unknown")))
         ));
         if let Some(ref addr) = email.email_addr {
             xml.push_str(&format!("    <email>{}</email>\n", escape_xml(addr)));
@@ -46,6 +46,7 @@ pub fn write_haof(store: &EmailStore, config: &Config) -> Result<String> {
     xml.push_str("</haof>\n");
 
     std::fs::write(&haof_path, &xml)?;
+    crate::file_utils::apply_permissions(&haof_path, config.filemode);
     Ok(xml)
 }
 
@@ -58,6 +59,8 @@ fn escape_xml(s: &str) -> String {
             '>' => result.push_str("&gt;"),
             '"' => result.push_str("&quot;"),
             '\'' => result.push_str("&apos;"),
+            c if !matches!(c, '\t' | '\n' | '\r' | '\u{20}'..='\u{d7ff}'
+                | '\u{e000}'..='\u{fffd}' | '\u{10000}'..='\u{10ffff}') => {},
             c => result.push(c),
         }
     }
@@ -74,14 +77,32 @@ mod tests {
     fn test_escape_xml() {
         assert_eq!(escape_xml("<test&>"), "&lt;test&amp;&gt;");
         assert_eq!(escape_xml("plain"), "plain");
+        assert_eq!(escape_xml("a\u{1}b\u{1b}c\td"), "abc\td");
+        assert_eq!(escape_xml("a\u{fffe}\u{ffff}b"), "ab");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_haof_uses_private_filemode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config {
+            dir: Some(dir.path().to_string_lossy().into_owned()),
+            filemode: 0o600,
+            ..Default::default()
+        };
+        write_haof(&EmailStore::new(), &config).unwrap();
+        let mode = std::fs::metadata(dir.path().join("haof.xml")).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
     }
 
     #[test]
     fn test_write_haof_basic() {
+        let dir = tempfile::tempdir().unwrap();
         let mut store = EmailStore::new();
         let email = EmailInfo {
             msgnum: 1,
-            name: Some("Alice".to_string()),
+            name: Some("=?utf-8?Q?J=C3=BCrgen?=".to_string()),
             email_addr: Some("alice@example.com".to_string()),
             subject: Some("Hello".to_string()),
             date: 1000000,
@@ -89,10 +110,11 @@ mod tests {
             ..Default::default()
         };
         store.add_email(email);
-        let config = Config::default();
+        let config =
+            Config { dir: Some(dir.path().to_string_lossy().into_owned()), ..Default::default() };
         let xml = write_haof(&store, &config).unwrap();
         assert!(xml.contains("<subject>Hello</subject>"));
-        assert!(xml.contains("<name>Alice</name>") || xml.contains("<from>Alice</from>"));
+        assert!(xml.contains("<from>Jürgen</from>"), "{xml}");
         assert!(xml.contains("<count>1</count>"));
     }
 }

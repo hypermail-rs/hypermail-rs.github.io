@@ -93,6 +93,9 @@ pub fn write_search_index(store: &EmailStore, config: &Config) -> Result<String>
 
     let mut content = String::new();
     for email in &store.emails {
+        if email.is_deleted != 0 && config.delete_level < crate::config::DELETE_LEAVES_TEXT {
+            continue;
+        }
         let text = extract_searchable_text(email);
         let line = format!("{}|{}", email.msgnum, sanitize_for_search(&text));
         content.push_str(&line);
@@ -100,12 +103,15 @@ pub fn write_search_index(store: &EmailStore, config: &Config) -> Result<String>
     }
 
     std::fs::write(&search_path, &content)?;
+    crate::file_utils::apply_permissions(&search_path, config.filemode);
     Ok(content)
 }
 
 fn sanitize_for_search(s: &str) -> String {
     s.chars()
         .filter(|c| c.is_alphanumeric() || c.is_whitespace() || *c == '.' || *c == '@' || *c == '-')
+        // one record per line: newlines in email text must not start a new record
+        .map(|c| if c.is_whitespace() { ' ' } else { c })
         .collect()
 }
 
@@ -113,6 +119,48 @@ fn sanitize_for_search(s: &str) -> String {
 mod tests {
     use super::*;
     use crate::message::{Body, BodyChain, EmailInfo};
+
+    #[test]
+    fn test_sanitize_removes_newlines() {
+        assert_eq!(sanitize_for_search("a\n9999|evil\r\n"), "a 9999evil  ");
+    }
+
+    #[test]
+    fn test_search_index_omits_deleted_message_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = EmailStore::new();
+        let mut deleted = make_email(1, "Private subject", "Private sender", "Private body");
+        deleted.is_deleted = 1;
+        store.add_email(deleted);
+        store.add_email(make_email(2, "Public subject", "Alice", "Public body"));
+        let config = Config {
+            dir: Some(dir.path().to_string_lossy().into_owned()),
+            delete_level: crate::config::DELETE_LEAVES_STUBS,
+            ..Default::default()
+        };
+        let content = write_search_index(&store, &config).unwrap();
+        assert!(!content.contains("Private"), "{content}");
+        assert!(content.contains("Public body"));
+        assert_eq!(content.lines().count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_search_index_uses_private_filemode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config {
+            dir: Some(dir.path().to_string_lossy().into_owned()),
+            filemode: 0o600,
+            ..Default::default()
+        };
+        write_search_index(&EmailStore::new(), &config).unwrap();
+        let mode = std::fs::metadata(dir.path().join("search_index.txt"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
 
     fn make_email(msgnum: i32, subject: &str, name: &str, body_text: &str) -> EmailInfo {
         EmailInfo {
@@ -127,6 +175,7 @@ mod tests {
                     parsed_header: false,
                     attached: false,
                     demimed: false,
+                    converted: false,
                     msgnum,
                 }],
             },

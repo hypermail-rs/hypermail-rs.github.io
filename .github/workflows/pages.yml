@@ -60,9 +60,9 @@ jobs:
           echo ""
           echo "===== Verifying required files exist ====="
           test -f docs/index.html || (echo "ERROR: docs/index.html not found" && exit 1)
-          echo "✓ docs/index.html exists"
+          echo "OK: docs/index.html exists"
           test -f docs/api-docs/hypermail/index.html || (echo "ERROR: API docs not generated" && exit 1)
-          echo "✓ docs/api-docs/hypermail/index.html exists"
+          echo "OK: docs/api-docs/hypermail/index.html exists"
           echo ""
           echo "===== Documentation structure verified ====="
 

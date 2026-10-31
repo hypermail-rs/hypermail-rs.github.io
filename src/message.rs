@@ -80,7 +80,10 @@ impl Push {
     }
 
     pub fn push_nstring(&mut self, s: &str, n: usize) {
-        let len = s.len().min(n);
+        let mut len = s.len().min(n);
+        while !s.is_char_boundary(len) {
+            len -= 1;
+        }
         self.string.push_str(&s[..len]);
     }
 
@@ -104,6 +107,8 @@ impl Push {
 #[derive(Debug, Clone)]
 pub struct Body {
     pub line: String,
+    /// True only for escaped markup emitted by `conv_showhtml`.
+    pub converted: bool,
     pub html: bool,
     pub header: bool,
     pub parsed_header: bool,
@@ -264,4 +269,18 @@ pub struct ArchiveState {
     pub msgid_table: HashMap<String, usize>,
     pub folders: Vec<EmailSubdir>,
     pub max_msgnum: i32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_push_nstring_respects_char_boundary() {
+        let mut p = Push::new();
+        p.push_nstring("é", 1);
+        assert_eq!(p.string, "");
+        p.push_nstring("aé", 3);
+        assert_eq!(p.string, "aé");
+    }
 }

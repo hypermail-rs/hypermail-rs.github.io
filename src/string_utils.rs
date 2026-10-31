@@ -87,7 +87,7 @@ pub fn parse_url(s: &str, url: &mut String) -> Option<usize> {
     }
 }
 
-/// Converts URLs in text to clickable HTML links.
+/// Converts URLs in raw text to clickable HTML links, escaping all other text.
 ///
 /// Detects http://, https://, ftp:// URLs and www. patterns, converting
 /// them to `<a>` tags with rel="noopener noreferrer" for security.
@@ -108,31 +108,34 @@ pub fn conv_urls(line: &str) -> String {
     // Security: Skip URL processing on unreasonably large inputs
     // This prevents ReDoS on malicious inputs with pathological patterns
     if line.len() > MAX_URL_LENGTH * 10 {
-        return line.to_string();
+        return crate::txt2html::escape_html(line);
     }
 
-    URL_RE
-        .replace_all(line, |caps: &regex::Captures| {
-            let url = &caps[1];
+    let mut result = String::new();
+    let mut end = 0;
+    for matched in URL_RE.find_iter(line) {
+        result.push_str(&crate::txt2html::escape_html(&line[end..matched.start()]));
+        let url = matched.as_str();
 
-            // Security: Skip extremely long URLs to prevent memory issues
-            if url.len() > MAX_URL_LENGTH {
-                return url.to_string();
-            }
-
+        // Security: Skip extremely long URLs to prevent memory issues
+        if url.len() > MAX_URL_LENGTH {
+            result.push_str(&crate::txt2html::escape_html(url));
+        } else {
             let href = if url.starts_with("www.") {
                 format!("https://{}", url)
             } else {
                 url.to_string()
             };
-            // SEC: Escape both href attribute and anchor text
-            format!(
+            result.push_str(&format!(
                 "<a href=\"{}\" rel=\"noopener noreferrer\">{}</a>",
                 escape_html_attr(&href),
                 escape_html_attr(url)
-            )
-        })
-        .to_string()
+            ));
+        }
+        end = matched.end();
+    }
+    result.push_str(&crate::txt2html::escape_html(&line[end..]));
+    result
 }
 
 /// Escape a string for safe use inside an HTML attribute value (double-quote delimited).
@@ -359,14 +362,7 @@ mod tests {
 
     #[test]
     fn test_conv_urls_escapes_href_with_quotes() {
-        // In practice, conv_urls() receives pre-escaped input from escape_html(),
-        // so raw " never appears. The URL regex [^\s<>"']+ also stops at " by design.
-        // Test that the escape_html + conv_urls pipeline is safe:
-        let escaped_input =
-            crate::txt2html::escape_html(r#"Visit https://evil.com/a"onmouseover="alert(1) today"#);
-        let result = conv_urls(&escaped_input);
-        // The " was escaped to &quot; before conv_urls, so it's part of the URL match
-        // but rendered safely in the href via escape_html_attr.
+        let result = conv_urls(r#"Visit https://evil.com/a"onmouseover="alert(1) today"#);
         assert!(
             !result.contains(r#""onmouseover"#),
             "raw double-quote injection must not appear: {}",
@@ -377,24 +373,30 @@ mod tests {
     #[test]
     fn test_conv_urls_escapes_special_chars_in_href() {
         // URLs with & should be properly escaped in the href attribute
-        let result = conv_urls("https://example.com/search?a=1&amp;b=2");
-        assert!(
-            result.contains("&amp;amp;") || result.contains("&amp;b=2"),
-            "& in URL should be preserved or double-escaped in href attribute: {}",
-            result
+        let result = conv_urls("https://example.com/search?a=1&b=2");
+        assert_eq!(
+            result,
+            "<a href=\"https://example.com/search?a=1&amp;b=2\" rel=\"noopener noreferrer\">https://example.com/search?a=1&amp;b=2</a>"
         );
     }
 
     #[test]
     fn test_conv_urls_escapes_angle_brackets() {
         // The URL regex stops at < so no <script> can appear in generated href
-        let escaped_input = crate::txt2html::escape_html("https://evil.com/<script>");
-        let result = conv_urls(&escaped_input);
+        let result = conv_urls("https://evil.com/<script>");
         assert!(
             !result.contains("<script>"),
             "angle brackets should not appear raw in link output: {}",
             result
         );
+    }
+
+    #[test]
+    fn test_conv_urls_length_limit_still_escapes_html() {
+        let input = format!("<script>{}</script>", "x".repeat(MAX_URL_LENGTH * 10));
+        let result = conv_urls(&input);
+        assert!(result.starts_with("&lt;script&gt;"));
+        assert!(!result.contains("<script>"));
     }
 
     #[test]

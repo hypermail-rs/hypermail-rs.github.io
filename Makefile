@@ -14,7 +14,7 @@ clippy:
 
 # Run both fmt and clippy
 check: fmt clippy
-	@echo "✅ Code quality checks passed"
+	@echo "OK: Code quality checks passed"
 
 # Build debug version
 build:
@@ -39,7 +39,7 @@ docs:
 	@mkdir -p docs/api-docs
 	@rm -rf docs/api-docs/*
 	@cp -r target/doc/* docs/api-docs/
-	@echo "✅ Documentation built: docs/api-docs/hypermail/index.html"
+	@echo "OK: Documentation built: docs/api-docs/hypermail/index.html"
 	@echo "Preview: python3 -m http.server 8000 --directory docs"
 
 # Run security audit (requires cargo-audit: cargo install cargo-audit)
@@ -66,7 +66,7 @@ fuzz-quick:
 	  echo "Fuzzing $$target..."; \
 	  cargo +nightly fuzz run $$target -- -max_total_time=10 -runs=10000 || true; \
 	done
-	@echo "✅ Fuzz tests completed"
+	@echo "OK: Fuzz tests completed"
 
 # Run fuzz tests (full - 5 minutes each)
 fuzz:
@@ -77,7 +77,7 @@ fuzz:
 	  echo "Fuzzing $$target..."; \
 	  cargo +nightly fuzz run $$target -- -max_total_time=300 || true; \
 	done
-	@echo "✅ Fuzz tests completed"
+	@echo "OK: Fuzz tests completed"
 
 # Clean build artifacts
 clean:
@@ -91,12 +91,12 @@ install-hooks:
 	@mkdir -p .git/hooks
 	@cp scripts/pre-commit .git/hooks/pre-commit
 	@chmod +x .git/hooks/pre-commit
-	@echo "✅ Git hooks installed"
+	@echo "OK: Git hooks installed"
 
 # Full CI workflow: format, lint, security audit, dep check, build, test
 ci: fmt clippy audit upgrade build test
-	@echo "✅ All CI checks passed"
+	@echo "OK: All CI checks passed"
 
 # Extended CI workflow with fuzz testing
 ci-fuzz: ci fuzz-quick
-	@echo "✅ All CI checks + fuzz tests passed"
+	@echo "OK: All CI checks + fuzz tests passed"

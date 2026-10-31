@@ -139,6 +139,7 @@ mod tests {
                     parsed_header: false,
                     attached: false,
                     demimed: false,
+                    converted: false,
                     msgnum: 0,
                 })
                 .collect(),

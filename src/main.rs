@@ -1019,6 +1019,7 @@ fn parse_email(
             parsed_header: false,
             attached: is_attached,
             demimed: false,
+            converted: false,
             msgnum,
         });
     }
@@ -1368,11 +1369,10 @@ fn write_indices(store: &EmailStore, config: &Config) -> Result<()> {
         let path = PathBuf::from(dir).join(format!("attachment.{}", config.htmlsuffix));
         fs::write(&path, &attachment_index)?;
         apply_permissions(&path, config.filemode);
-
-        // Also write the full-text search index alongside it.
-        log::info!("Writing search index...");
-        write_search_index(store, config)?;
     }
+
+    log::info!("Writing search index...");
+    write_search_index(store, config)?;
 
     // Write top-level folders.html and per-folder index pages when folder layout is active.
     if config.folder_by_date.is_some() || config.msgsperfolder > 0 {

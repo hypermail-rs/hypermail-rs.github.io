@@ -181,7 +181,12 @@ pub fn get_date_str(
     };
 
     let raw = if let Some(format_str) = fmt {
-        dt.format(format_str).to_string()
+        // invalid user format (e.g. "%Q") makes Display error; to_string() would panic
+        let mut s = String::new();
+        if std::fmt::Write::write_fmt(&mut s, format_args!("{}", dt.format(format_str))).is_err() {
+            s = dt.to_rfc2822();
+        }
+        s
     } else if isodate {
         if gmtime {
             dt.format("%Y-%m-%d %H:%M:%SZ").to_string()
@@ -230,6 +235,12 @@ pub fn get_timezone_str() -> String {
 mod tests {
     use super::*;
     use chrono::Timelike;
+
+    #[test]
+    fn test_invalid_format_no_panic() {
+        let ds = get_date_str(1615809600, Some("%Q"), true, false, false, "en");
+        assert!(ds.contains("2021"), "fallback should still show the date: {ds}");
+    }
 
     #[test]
     fn test_parse_rfc2822() {

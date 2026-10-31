@@ -586,6 +586,17 @@ impl Config {
 
     /// Sets an integer configuration value by key name.
     pub fn set_integer(&mut self, key: &str, val: i64) -> Result<()> {
+        // `as` casts below would silently wrap (e.g. -1 -> usize::MAX disables size limits)
+        let unsigned = matches!(key, "max_message_size" | "max_messages");
+        if (!unsigned && i32::try_from(val).is_err())
+            || (unsigned && usize::try_from(val).is_err())
+            || (matches!(key, "filemode" | "dirmode") && !(0..=0o7777).contains(&val))
+        {
+            return Err(HypermailError::InvalidConfigValue {
+                key: key.to_string(),
+                message: format!("value out of range: {}", val),
+            });
+        }
         match key {
             "increment" => self.increment = val as i32,
             "showhtml" => self.showhtml = val as i32,
@@ -766,6 +777,25 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_set_integer_rejects_out_of_range() {
+        let mut cfg = Config::default();
+        assert!(cfg.set_integer("max_message_size", -1).is_err());
+        assert!(cfg.set_integer("filemode", 4_294_967_295).is_err());
+        assert!(cfg.set_integer("max_message_size", 1000).is_ok());
+        assert_eq!(cfg.max_message_size, 1000);
+    }
+
+    #[test]
+    fn test_permission_modes_reject_negative_or_non_permission_bits() {
+        let mut config = Config::default();
+        for key in ["filemode", "dirmode"] {
+            assert!(config.set_integer(key, -1).is_err());
+            assert!(config.set_integer(key, 0o10000).is_err());
+            assert!(config.set_integer(key, 0o600).is_ok());
+        }
+    }
 
     #[test]
     fn test_default_config() {

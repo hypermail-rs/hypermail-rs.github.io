@@ -454,9 +454,8 @@ fn format_body(body_chain: &crate::message::BodyChain, config: &Config) -> Strin
                 html.push_str("</details>\n");
                 in_attachment = false;
             }
-            // Only pass through converter-emitted markup (hm-* classes). showhtml>=2
-            // may leave raw HTML; that still goes through the allowlist or is escaped.
-            if is_trusted_body_markup(&body.line) {
+            // conv_showhtml escapes email text before emitting these hm-* wrappers.
+            if body.converted && is_trusted_body_markup(&body.line) {
                 // Blank-line marker: produce a paragraph gap *within* the
                 // current run. Combined with the trailing `\n` already on the
                 // previous line, this gives `pre-wrap` a real empty line.
@@ -556,11 +555,39 @@ mod tests {
                     parsed_header: false,
                     attached: false,
                     demimed: false,
+                    converted: false,
                     msgnum: 0,
                 }],
             },
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn test_html_body_cannot_impersonate_converter_markup() {
+        for showhtml in 0..=4 {
+            for is_html in [false, true] {
+                let config = Config { showhtml, ..Default::default() };
+                let mut email = make_test_email();
+                email.bodylist.bodies[0].html = is_html;
+                email.bodylist.bodies[0].line =
+                    "<div class=\"hm-pg\"><img src=x onerror=alert(1)></div>".to_string();
+                crate::txt2html::conv_showhtml(&mut email.bodylist, &config);
+                let output = format_body(&email.bodylist, &config);
+                assert!(!output.contains("<img"), "showhtml={showhtml}, html={is_html}: {output}");
+                assert!(output.contains("&lt;img"));
+            }
+        }
+    }
+
+    #[test]
+    fn test_unconverted_body_prefix_is_not_trusted() {
+        let config = Config::default();
+        let mut email = make_test_email();
+        email.bodylist.bodies[0].line = "<hr class=\"hm-sig\" onmouseover=alert(1)>".to_string();
+        let output = print_article(&email, &EmailStore::new(), &config).unwrap();
+        assert!(!output.contains("<hr class=\"hm-sig\" onmouseover="));
+        assert!(output.contains("&lt;hr"));
     }
 
     #[test]
@@ -674,6 +701,7 @@ mod tests {
             parsed_header: false,
             attached: false,
             demimed: false,
+            converted: false,
             msgnum: 1,
         });
         let config = Config::default();
@@ -686,15 +714,17 @@ mod tests {
     fn test_format_body_passes_div_through() {
         let mut chain = BodyChain { bodies: Vec::new() };
         chain.bodies.push(Body {
-            line: "<div class=\"hm-pg\">safe</div>\n".to_string(),
+            line: "safe".to_string(),
             html: false,
             header: false,
             parsed_header: false,
             attached: false,
             demimed: false,
+            converted: false,
             msgnum: 1,
         });
         let config = Config::default();
+        crate::txt2html::conv_showhtml(&mut chain, &config);
         let result = format_body(&chain, &config);
         assert!(result.contains("<div class=\"hm-pg\">safe</div>"));
     }
@@ -777,6 +807,7 @@ mod tests {
                 parsed_header: false,
                 attached: false,
                 demimed: false,
+                converted: false,
                 msgnum: 42,
             }],
         };

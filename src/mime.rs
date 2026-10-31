@@ -32,8 +32,9 @@ impl ContentType {
                 if let Some(eq) = part.find('=') {
                     let key = part[..eq].trim().to_lowercase();
                     let mut val = part[eq + 1..].trim().to_string();
-                    if (val.starts_with('"') && val.ends_with('"'))
-                        || (val.starts_with('\'') && val.ends_with('\''))
+                    if val.len() >= 2
+                        && ((val.starts_with('"') && val.ends_with('"'))
+                            || (val.starts_with('\'') && val.ends_with('\'')))
                     {
                         val = val[1..val.len() - 1].to_string();
                     }
@@ -95,8 +96,9 @@ impl ContentDisposition {
                 if let Some(eq) = part.find('=') {
                     let key = part[..eq].trim().to_lowercase();
                     let mut val = part[eq + 1..].trim().to_string();
-                    if (val.starts_with('"') && val.ends_with('"'))
-                        || (val.starts_with('\'') && val.ends_with('\''))
+                    if val.len() >= 2
+                        && ((val.starts_with('"') && val.ends_with('"'))
+                            || (val.starts_with('\'') && val.ends_with('\'')))
                     {
                         val = val[1..val.len() - 1].to_string();
                     }
@@ -299,7 +301,7 @@ fn find_multipart_charset(body: &[u8], boundary: &str) -> Option<String> {
             let part_headers = &after_eol[..header_end];
             if let Ok(header_block) = std::str::from_utf8(part_headers) {
                 for line in header_block.lines() {
-                    let lower = line.to_lowercase();
+                    let lower = line.to_ascii_lowercase();
                     if lower.starts_with("content-type:") {
                         if let Some(charset_start) = lower.find("charset=") {
                             let after = &line[charset_start + 8..];
@@ -875,6 +877,12 @@ mod tests {
     }
 
     #[test]
+    fn test_param_single_quote_char_no_panic() {
+        assert_eq!(ContentType::parse("text/plain; charset=\"").charset(), Some("\""));
+        assert_eq!(ContentDisposition::parse("attachment; filename='").filename(), Some("'"));
+    }
+
+    #[test]
     fn test_content_disposition_inline() {
         let cd = ContentDisposition::parse("inline");
         assert!(!cd.is_attachment());
@@ -1122,6 +1130,12 @@ mod tests {
             .to_string();
         let result = find_multipart_charset(body.as_bytes(), boundary);
         assert_eq!(result.as_deref(), Some("iso-8859-7"));
+    }
+
+    #[test]
+    fn test_multipart_charset_preserves_unicode_header_offsets() {
+        let body = "--boundary\nContent-Type: text/plain; nameİİİ=x; charset=utf-8\n\nbody\n--boundary--\n";
+        assert_eq!(find_multipart_charset(body.as_bytes(), "boundary").as_deref(), Some("utf-8"));
     }
 
     #[test]

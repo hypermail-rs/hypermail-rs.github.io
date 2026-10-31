@@ -748,6 +748,10 @@ pub fn print_folder_index_set(
     let suffix = &config.htmlsuffix;
 
     for (folder, indices) in &folder_map {
+        // undated messages have no folder; writing "" would overwrite the root indices
+        if folder.is_empty() {
+            continue;
+        }
         // Build a mini-store containing only this folder's messages.
         let mut sub_store = EmailStore::new();
         for &idx in indices {
@@ -1119,6 +1123,7 @@ mod tests {
                     parsed_header: false,
                     attached: true,
                     demimed: false,
+                    converted: false,
                     msgnum: 1,
                 }],
             },
@@ -1237,6 +1242,18 @@ mod tests {
     // -----------------------------------------------------------------------
     // print_folder_index_set
     // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_folder_index_set_undated_message_does_not_overwrite_root() {
+        let (mut store, config) = make_foldered_store();
+        store.add_email(EmailInfo { msgnum: 3, date: 0, ..Default::default() });
+        let pages = print_folder_index_set(&store, &config).unwrap();
+        assert!(
+            pages.iter().all(|(p, _)| p.contains('/')),
+            "got: {:?}",
+            pages.iter().map(|(p, _)| p).collect::<Vec<_>>()
+        );
+    }
 
     #[test]
     fn test_folder_index_set_returns_four_pages_per_folder() {

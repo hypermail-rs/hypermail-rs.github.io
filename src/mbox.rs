@@ -38,6 +38,7 @@ pub struct RawMessage {
 ///
 /// Enforces per-message and per-line size limits to prevent memory exhaustion
 /// from malicious or malformed input.
+/// Stops after any read or size-limit error; partial messages are never returned.
 pub struct MboxReader<R: Read> {
     reader: BufReader<R>,
     format: MboxFormat,
@@ -98,7 +99,7 @@ impl<R: Read> Iterator for MboxReader<R> {
             let mut line = Vec::new();
             self.line_num += 1;
 
-            match self.reader.read_until(b'\n', &mut line) {
+            match self.reader.by_ref().take(MAX_LINE_SIZE as u64 + 1).read_until(b'\n', &mut line) {
                 Ok(0) => {
                     self.eof = true;
                     if self.buffer.is_empty() {
@@ -108,16 +109,20 @@ impl<R: Read> Iterator for MboxReader<R> {
                 },
                 Ok(_) => {},
                 Err(e) => {
+                    self.eof = true;
+                    self.buffer.clear();
                     return Some(Err(HypermailError::MboxParse {
                         line: self.line_num,
                         message: format!("read error: {e}"),
-                    }))
+                    }));
                 },
             }
 
             // Security: Check line size to prevent memory exhaustion
             // from pathological inputs with extremely long lines
             if line.len() > MAX_LINE_SIZE {
+                self.eof = true;
+                self.buffer.clear();
                 return Some(Err(HypermailError::MboxParse {
                     line: self.line_num,
                     message: format!(
@@ -133,6 +138,17 @@ impl<R: Read> Iterator for MboxReader<R> {
                 if line.last() == Some(&b'\r') {
                     line.pop();
                 }
+            }
+
+            if (self.buffer.is_empty() || Self::is_from_line(&line))
+                && line.len() + 1 > self.max_message_size
+            {
+                self.eof = true;
+                self.buffer.clear();
+                return Some(Err(HypermailError::MboxParse {
+                    line: self.line_num,
+                    message: "envelope exceeds maximum message size".to_string(),
+                }));
             }
 
             if self.buffer.is_empty() {
@@ -157,6 +173,7 @@ impl<R: Read> Iterator for MboxReader<R> {
             // Prevents denial-of-service via extremely large messages
             let new_size = self.buffer.len() + line.len() + 1;
             if new_size > self.max_message_size {
+                self.eof = true;
                 self.buffer.clear();
                 return Some(Err(HypermailError::MboxParse {
                     line: self.line_num,
@@ -194,6 +211,10 @@ fn parse_raw_message(data: &[u8]) -> RawMessage {
         &[]
     };
 
+    if let Some(body) = rest.strip_prefix(b"\n") {
+        return RawMessage { from_line, headers: Vec::new(), body: body.to_vec() };
+    }
+
     let sep = rest
         .windows(2)
         .position(|w| w == b"\n\n")
@@ -225,6 +246,32 @@ fn parse_raw_message(data: &[u8]) -> RawMessage {
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    #[test]
+    fn test_oversized_line_read_is_bounded() {
+        let data = vec![b'a'; MAX_LINE_SIZE * 2];
+        let mut reader = MboxReader::new(Cursor::new(data), MboxFormat::MboxO);
+        assert!(reader.next().unwrap().is_err());
+        assert!(reader.reader.get_ref().position() <= (MAX_LINE_SIZE + 8192) as u64);
+        assert!(reader.next().is_none());
+    }
+
+    #[test]
+    fn test_oversized_message_stops_without_returning_body_as_message() {
+        let data = b"From a\nSubject: first\n\nlong body\nremaining body\nFrom b\n\nok\n";
+        let mut reader =
+            MboxReader::new(Cursor::new(data), MboxFormat::MboxO).with_max_message_size(25);
+        assert!(reader.next().unwrap().is_err());
+        assert!(reader.next().is_none());
+    }
+
+    #[test]
+    fn test_envelope_alone_respects_message_limit() {
+        let mut reader = MboxReader::new(Cursor::new(b"From a long envelope\n"), MboxFormat::MboxO)
+            .with_max_message_size(5);
+        assert!(reader.next().unwrap().is_err());
+        assert!(reader.next().is_none());
+    }
 
     fn create_mbox_data() -> Vec<u8> {
         b"From alice@example.com Mon Jan 01 12:00:00 2024\n\
@@ -292,6 +339,7 @@ mod tests {
         let messages: Vec<Result<RawMessage>> = reader.collect();
         assert_eq!(messages.len(), 1);
         assert!(messages[0].is_ok());
+        assert_eq!(messages[0].as_ref().unwrap().body, b"Just a body\n");
     }
 
     #[test]

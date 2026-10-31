@@ -69,19 +69,17 @@ fn txt2html_line(line: &str, config: &Config, in_sig: &mut bool) -> String {
     if is_quote {
         let unquoted = unquote(line);
         let quote_class = find_quote_class(line);
-        let escaped = escape_html(&unquoted);
         let with_links = if config.href_detection {
-            conv_urls(&escaped)
+            conv_urls(&unquoted)
         } else {
-            escaped
+            escape_html(&unquoted)
         };
         format!("<div class=\"{}\">{}</div>\n", quote_class, with_links)
     } else {
-        let escaped = escape_html(line);
         let with_links = if config.href_detection {
-            conv_urls(&escaped)
+            conv_urls(line)
         } else {
-            escaped
+            escape_html(line)
         };
         format!("<div class=\"{}\">{}</div>\n", pg_class, with_links)
     }
@@ -108,9 +106,10 @@ pub fn conv_showhtml(body: &mut BodyChain, config: &Config) {
     let mut in_sig = false;
 
     for b in &mut body.bodies {
-        if b.attached || b.header {
+        if b.attached || b.header || b.converted {
             continue;
         }
+        b.converted = true;
 
         // Detect signature start
         let trimmed = b.line.trim_end_matches('\n').trim_end_matches('\r');
@@ -123,28 +122,13 @@ pub fn conv_showhtml(body: &mut BodyChain, config: &Config) {
         let pg_class = if in_sig { "hm-sig-text" } else { "hm-pg" };
 
         if b.html {
-            if showhtml >= 2 {
-                continue;
-            }
-            if showhtml == 0 {
-                let escaped = escape_html(&b.line);
-                b.line = if escaped.is_empty() {
-                    String::from("<div class=\"hm-blank\"></div>\n")
-                } else {
-                    format!("<div class=\"{}\">{}</div>\n", pg_class, escaped)
-                };
-                continue;
-            }
-            // showhtml == 1: escape HTML body text
-            if showhtml == 1 || showhtml >= 4 {
-                let escaped = escape_html(&b.line);
-                b.line = if escaped.is_empty() {
-                    String::new()
-                } else {
-                    format!("<div class=\"{}\">{}</div>\n", pg_class, escaped)
-                };
-                continue;
-            }
+            // Email HTML is untrusted even when it mimics our hm-* converter markup.
+            let escaped = escape_html(&b.line);
+            b.line = if escaped.is_empty() {
+                String::from("<div class=\"hm-blank\"></div>\n")
+            } else {
+                format!("<div class=\"{}\">{}</div>\n", pg_class, escaped)
+            };
             continue;
         }
         // !b.html (plain text body)
@@ -167,11 +151,10 @@ pub fn conv_showhtml(body: &mut BodyChain, config: &Config) {
             }
 
             // Normal text processing; linkify when href_detection is enabled (Hypermail default path)
-            let escaped = escape_html(&b.line);
             let content = if config.href_detection {
-                conv_urls(&escaped)
+                conv_urls(&b.line)
             } else {
-                escaped
+                escape_html(&b.line)
             };
             b.line = if content.is_empty() {
                 String::from("<div class=\"hm-blank\"></div>\n")
@@ -180,10 +163,7 @@ pub fn conv_showhtml(body: &mut BodyChain, config: &Config) {
             };
             continue;
         }
-        if showhtml == 2 || showhtml == 3 {
-            b.line = txt2html_line(&b.line, config, &mut in_sig);
-            continue;
-        }
+        b.line = txt2html_line(&b.line, config, &mut in_sig);
     }
 }
 
@@ -193,11 +173,10 @@ pub fn conv_body_line(line: &str, config: &Config) -> String {
     }
 
     let is_quote = line.starts_with('>');
-    let escaped = escape_html(line);
     let with_links = if config.href_detection {
-        conv_urls(&escaped)
+        conv_urls(line)
     } else {
-        escaped
+        escape_html(line)
     };
 
     if is_quote {
@@ -223,6 +202,22 @@ mod tests {
 
     fn make_config() -> Config {
         Config::default()
+    }
+
+    #[test]
+    fn test_link_detection_escapes_once_and_stops_at_angle_brackets() {
+        let config = Config { href_detection: true, ..Default::default() };
+        for showhtml in [1, 2] {
+            let mut chain = make_body_chain("<https://example.com/?a=1&b=2> <script>bad</script>");
+            let config = Config { showhtml, ..config.clone() };
+            conv_showhtml(&mut chain, &config);
+            let output = &chain.bodies[0].line;
+            assert!(output.contains("href=\"https://example.com/?a=1&amp;b=2\""), "{output}");
+            assert!(output.contains("</a>&gt; &lt;script&gt;bad&lt;/script&gt;"), "{output}");
+            assert!(!output.contains("&amp;amp;"));
+        }
+        let output = conv_body_line("<https://example.com/?a=1&b=2>", &config);
+        assert!(output.contains("href=\"https://example.com/?a=1&amp;b=2\""), "{output}");
     }
 
     #[test]
@@ -284,6 +279,7 @@ mod tests {
             parsed_header: false,
             attached: false,
             demimed: false,
+            converted: false,
             msgnum: 1,
         });
         chain
@@ -377,6 +373,7 @@ mod tests {
             parsed_header: false,
             attached: true,
             demimed: false,
+            converted: false,
             msgnum: 1,
         });
         conv_showhtml(&mut chain, &config);
@@ -396,6 +393,7 @@ mod tests {
             parsed_header: false,
             attached: false,
             demimed: false,
+            converted: false,
             msgnum: 1,
         });
         conv_showhtml(&mut chain, &config);
