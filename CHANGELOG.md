@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.1.0] - 2026-11-01
 
+### Changed
+
+- Dependencies updated: `base64` 0.22 → 0.23, plus lockfile refresh.
+
 ### Fixed
 
 - `delete_older`/`delete_newer`: empty config values are now treated as unset instead of emitting a spurious "Could not parse date" warning on every run.
