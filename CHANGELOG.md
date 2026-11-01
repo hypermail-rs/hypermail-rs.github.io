@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Message and index links no longer 404 inside `folder_by_date`/`msgsperfolder` subfolder pages.
 - `delete_older`/`delete_newer`: empty config values are now treated as unset instead of emitting a spurious "Could not parse date" warning on every run.
 - `-t`/`--tables` now correctly maps to `indextable` (same as `-T`) instead of being a no-op.
 - Absolute-path guard for `folder_by_date`/`latest_folder` now correctly rejects Unix-style absolute paths on Windows.
