@@ -1,6 +1,6 @@
 [package]
 name = "hypermail-rs"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
 rust-version = "1.91"  # Required for floor_char_boundary() and modern str methods
 description = "A Rust reimplementation of Hypermail - converts mbox files to cross-referenced HTML archives"

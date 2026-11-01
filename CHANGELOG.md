@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-01
+
 ### Fixed
 
 - `delete_older`/`delete_newer`: empty config values are now treated as unset instead of emitting a spurious "Could not parse date" warning on every run.
@@ -96,3 +98,4 @@ For users migrating from Hypermail 2.4.0:
 ---
 
 [1.0.0]: https://github.com/hypermail-rs/hypermail-rs.github.io/releases/tag/v1.0.0
+[1.1.0]: https://github.com/hypermail-rs/hypermail-rs.github.io/releases/tag/v1.1.0
