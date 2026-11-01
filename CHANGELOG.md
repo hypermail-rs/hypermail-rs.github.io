@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Dependencies updated: `base64` 0.22 → 0.23, plus lockfile refresh.
+- Docs (README, website, SECURITY, CONTRIBUTING) updated to match the code; release notes are now generated from this changelog.
 
 ### Fixed
 

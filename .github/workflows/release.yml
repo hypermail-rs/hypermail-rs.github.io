@@ -103,6 +103,12 @@ jobs:
       - name: Generate checksums
         run: sha256sum hypermail-*.tar.gz hypermail-*.zip > SHA256SUMS.txt
 
+      - name: Extract release notes from CHANGELOG
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          awk -v h="## [$v]" 'index($0,h)==1{f=1;next} /^## \[/{f=0} f' CHANGELOG.md > RELEASE_NOTES.md
+          test -s RELEASE_NOTES.md || { echo "No CHANGELOG section for $v"; exit 1; }
+
       - name: Create release
         uses: softprops/action-gh-release@v3
         with:
@@ -110,6 +116,6 @@ jobs:
             hypermail-*.tar.gz
             hypermail-*.zip
             SHA256SUMS.txt
-          generate_release_notes: true
+          body_path: RELEASE_NOTES.md
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}

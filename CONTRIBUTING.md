@@ -79,9 +79,13 @@ This will:
 Our CI pipeline (GitHub Actions) runs on every push and pull request:
 - ✅ Formatting check (`cargo fmt --check`)
 - ✅ Clippy lints (`cargo clippy`)
+- ✅ Security audit (`cargo audit`) and dependency check
+- ✅ MSRV check (Rust 1.91)
 - ✅ Tests on Ubuntu, macOS, and Windows
 - ✅ Release build verification
 - ✅ Code coverage analysis
+
+Pushing a `v*` tag builds release binaries (Linux, macOS, Windows; x86_64 and ARM64 where listed in `.github/workflows/release.yml`) and publishes a GitHub release.
 
 All checks must pass before a PR can be merged.
 
@@ -155,22 +159,14 @@ cargo test mime::tests::
 
 ```
 hypermail-rs/
-├── src/
-│   ├── main.rs          # CLI entry point
-│   ├── lib.rs           # Library exports
-│   ├── config.rs        # Configuration
-│   ├── headers.rs       # Email header parsing
-│   ├── mime.rs          # MIME body parsing
-│   ├── html.rs          # HTML generation
-│   ├── templates.rs     # HTML templates
-│   ├── txt2html.rs      # Text to HTML conversion
-│   └── date.rs          # Date parsing
+├── src/                 # Library modules (see src/lib.rs) and CLI entry point (main.rs)
 ├── tests/               # Integration tests
+├── fuzz/                # Fuzz targets
 ├── scripts/             # Development scripts
 │   └── pre-commit       # Git pre-commit hook
+├── docs/                # GitHub Pages site
 ├── .github/
-│   └── workflows/       # CI/CD workflows
-│       └── ci.yml       # GitHub Actions CI
+│   └── workflows/       # ci.yml, pages.yml, release.yml
 ├── Makefile             # Build automation
 └── Cargo.toml           # Rust package config
 ```

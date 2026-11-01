@@ -60,7 +60,7 @@ fn test_cli_help() {
 #[test]
 fn test_cli_version() {
     let (stdout, _) = run_ok(&["--version"]);
-    assert!(stdout.contains("1.0"), "--version should print version");
+    assert!(stdout.contains(env!("CARGO_PKG_VERSION")), "--version should print version");
 }
 
 // -v / --verbose: print config and exit

@@ -22,9 +22,9 @@ What you expected to happen.
 What actually happened. Include error messages if any.
 
 **Environment**
-- OS: [e.g., macOS 14, Ubuntu 24.04, Windows 11]
-- hypermail-rs version: [e.g., 1.0.0]
-- Rust version (if building from source): [e.g., 1.91.0]
+- OS and CPU architecture:
+- hypermail-rs version (`hypermail --version`):
+- Rust version (if building from source, `rustc --version`):
 
 **Sample input**
 If applicable, attach or paste a minimal mbox file that reproduces the issue.

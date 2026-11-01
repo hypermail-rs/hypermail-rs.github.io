@@ -58,9 +58,11 @@ hypermail-rs reads one or more mailbox files (or stdin) and produces a set of in
 - Quote attribution linking and collapsible nested quotes
 - Attachment extraction with inline image display
 - Full-text search index (`search_index.txt`) generated alongside archives
-- Platform: Linux, macOS (Windows partial — no file locking)
+- Platform: Linux, macOS (Windows works, but the archive directory lock is advisory only — no exclusive file locking)
 
 ## Installation
+
+Pre-built binaries (Linux x86_64/ARM64, macOS Intel/Apple Silicon, Windows x86_64) with SHA-256 checksums are on the [Releases page](https://github.com/hypermail-rs/hypermail-rs.github.io/releases/latest). Or build from source:
 
 ```sh
 cargo build --release
